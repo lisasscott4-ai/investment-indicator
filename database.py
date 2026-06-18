@@ -190,8 +190,8 @@ def init_db():
             "ALTER TABLE users ADD COLUMN birthday TEXT",
             "ALTER TABLE users ADD COLUMN phone TEXT",
             "ALTER TABLE users ADD COLUMN address TEXT",
-            # Existing admin accounts should be active
-            "UPDATE users SET status = 'active' WHERE is_admin = 1 AND (status IS NULL OR status = 'pending')",
+            # All pre-existing accounts get active status (approval system is new)
+            "UPDATE users SET status = 'active' WHERE status IS NULL",
         ]:
             try:
                 conn.execute(text(sql))
