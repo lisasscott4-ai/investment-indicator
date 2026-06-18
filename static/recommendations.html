@@ -103,7 +103,7 @@
   </div>
 
 <script>
-  let authToken = localStorage.getItem('token');
+  let authToken = sessionStorage.getItem('token');
 
   async function apiFetch(url, opts = {}) {
     const res = await fetch(url, {
@@ -115,7 +115,7 @@
     });
     if (res.status === 401) {
       authToken = null;
-      localStorage.removeItem('token');
+      sessionStorage.removeItem('token');
       window.location.href = '/';
     }
     return res;

@@ -90,11 +90,7 @@
         <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password"
           class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-2 focus:outline-none"
           onkeydown="if(event.key==='Enter') doAuth()" />
-        <div class="flex items-center justify-between mb-1">
-          <label class="flex items-center gap-2 text-xs text-black cursor-pointer">
-            <input type="checkbox" id="remember-me" checked class="accent-pink-700" />
-            Remember me (30 days)
-          </label>
+        <div class="flex justify-end mb-1">
           <button type="button" onclick="showForgot()"
             class="text-xs text-black underline opacity-60 hover:opacity-100">Forgot password?</button>
         </div>
@@ -276,7 +272,7 @@
   </div>
 
 <script>
-  let authToken = localStorage.getItem('token');
+  let authToken = sessionStorage.getItem('token');
   let authMode = 'login';
 
   async function apiFetch(url, opts = {}) {
@@ -291,7 +287,7 @@
       const err = await res.json().catch(() => ({}));
       const expired = err.detail && err.detail.toLowerCase().includes('expired');
       authToken = null;
-      localStorage.removeItem('token');
+      sessionStorage.removeItem('token');
       showAuthModal(expired ? 'Your session expired — please log in again.' : null);
       throw new Error(err.detail || 'Not authenticated');
     }
@@ -407,7 +403,7 @@
     }
     const { token, username: uname } = await res.json();
     authToken = token;
-    localStorage.setItem('token', token);
+    sessionStorage.setItem('token', token);
     const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
     const meData = me.ok ? await me.json() : {};
     afterAuth(uname, meData.is_admin || false);
@@ -454,7 +450,7 @@
       headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
     }).catch(() => {});
     authToken = null;
-    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
     document.getElementById('admin-link').style.display = 'none';
     showAuthModal();
   }
@@ -468,7 +464,7 @@
       const err = await res.json().catch(() => ({}));
       const expired = err.detail && err.detail.toLowerCase().includes('expired');
       authToken = null;
-      localStorage.removeItem('token');
+      sessionStorage.removeItem('token');
       showAuthModal(expired ? 'Your session expired — please log in again.' : null);
       return;
     }

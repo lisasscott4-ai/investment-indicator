@@ -122,7 +122,7 @@
   </div>
 
 <script>
-  let authToken = localStorage.getItem('token');
+  let authToken = sessionStorage.getItem('token');
 
   async function apiFetch(url, opts = {}) {
     const res = await fetch(url, {
@@ -143,7 +143,7 @@
       method: 'POST',
       headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
     }).catch(() => {});
-    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
     window.location.href = '/';
   }
 
@@ -409,7 +409,7 @@
     }
     const { token } = await res.json();
     authToken = token;
-    localStorage.setItem('token', token);
+    sessionStorage.setItem('token', token);
     msg.textContent = 'Admin account created — reloading...';
     msg.className = 'text-sm self-center text-green-800';
     setTimeout(() => window.location.reload(), 1200);
