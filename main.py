@@ -1,15 +1,33 @@
 import json
 import os
 import threading
+import time
 import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.background import BackgroundScheduler
 from pydantic import BaseModel
+
+# ── Rate limiting (in-memory) ─────────────────────────────────────────────────
+_login_attempts: dict = defaultdict(list)
+RATE_LIMIT_MAX = 5
+RATE_LIMIT_WINDOW = 300  # 5 minutes
+
+def _check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < RATE_LIMIT_WINDOW]
+    return len(_login_attempts[ip]) < RATE_LIMIT_MAX
+
+def _record_fail(ip: str):
+    _login_attempts[ip].append(time.time())
+
+def _clear_attempts(ip: str):
+    _login_attempts.pop(ip, None)
 
 load_dotenv()
 
@@ -19,7 +37,8 @@ from database import (
     update_asset_name, set_sharesies_flag,
     save_recommendations, get_latest_recommendations,
     create_user, authenticate_user, create_session,
-    get_session_user, delete_session, get_username,
+    get_session_user, refresh_session, delete_session,
+    clean_expired_sessions, get_username,
     is_admin, admin_exists, get_all_users, get_platform_stats,
     get_health_warnings, get_pending_users, approve_user, reject_user,
     verify_birthday, update_password,
@@ -35,6 +54,7 @@ async def lifespan(app: FastAPI):
     init_db()
     interval_hours = int(os.getenv("REFRESH_HOURS", "6"))
     scheduler.add_job(refresh_all, 'interval', hours=interval_hours, id='refresh_all')
+    scheduler.add_job(clean_expired_sessions, 'interval', hours=24, id='clean_sessions')
     scheduler.start()
     print(f"Investment Indicator started — auto-refresh every {interval_hours}h")
     yield
@@ -50,6 +70,7 @@ class AddAssetRequest(BaseModel):
 class AuthRequest(BaseModel):
     username: str
     password: str
+    remember_me: bool = True
 
 class RegisterRequest(BaseModel):
     username: str
@@ -71,9 +92,11 @@ def require_user(authorization: str = Header(None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Not authenticated")
     token = authorization[7:]
-    user_id = get_session_user(token)
+    user_id, expired = get_session_user(token)
+    if expired:
+        raise HTTPException(401, "Session expired — please log in again")
     if not user_id:
-        raise HTTPException(401, "Invalid or expired session")
+        raise HTTPException(401, "Not authenticated")
     return user_id
 
 def require_admin(user_id: str = Depends(require_user)) -> str:
@@ -99,15 +122,21 @@ def register(req: RegisterRequest):
     return {"pending": True, "username": username.lower()}
 
 @app.post("/api/auth/login")
-def login(req: AuthRequest):
+def login(req: AuthRequest, request: Request):
+    ip = request.client.host
+    if not _check_rate_limit(ip):
+        raise HTTPException(429, "Too many failed attempts — try again in 5 minutes")
     user_id, status = authenticate_user(req.username, req.password)
     if not user_id:
+        _record_fail(ip)
         raise HTTPException(401, "Invalid username or password")
     if status == 'pending':
+        _record_fail(ip)
         raise HTTPException(403, "Your account is awaiting admin approval")
     if status == 'rejected':
         raise HTTPException(403, "Your account request was not approved")
-    token = create_session(user_id)
+    _clear_attempts(ip)
+    token = create_session(user_id, remember_me=req.remember_me)
     return {"token": token, "username": req.username.lower().strip()}
 
 @app.post("/api/auth/verify-birthday")
@@ -127,6 +156,12 @@ def reset_password_endpoint(req: ResetPasswordRequest):
 def logout(authorization: str = Header(None)):
     if authorization and authorization.startswith("Bearer "):
         delete_session(authorization[7:])
+    return {"ok": True}
+
+@app.post("/api/auth/refresh")
+def auth_refresh(authorization: str = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        refresh_session(authorization[7:])
     return {"ok": True}
 
 @app.get("/api/auth/me")

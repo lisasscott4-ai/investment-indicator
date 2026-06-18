@@ -88,10 +88,16 @@
         <input id="auth-username" type="text" placeholder="Username" autocomplete="username"
           class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-3 focus:outline-none" />
         <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password"
-          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-1 focus:outline-none"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-2 focus:outline-none"
           onkeydown="if(event.key==='Enter') doAuth()" />
-        <button type="button" onclick="showForgot()"
-          class="text-xs text-black underline opacity-60 hover:opacity-100 mt-1 mb-1">Forgot password?</button>
+        <div class="flex items-center justify-between mb-1">
+          <label class="flex items-center gap-2 text-xs text-black cursor-pointer">
+            <input type="checkbox" id="remember-me" checked class="accent-pink-700" />
+            Remember me (30 days)
+          </label>
+          <button type="button" onclick="showForgot()"
+            class="text-xs text-black underline opacity-60 hover:opacity-100">Forgot password?</button>
+        </div>
       </div>
 
       <!-- Forgot password — step 1: verify birthday -->
@@ -282,17 +288,23 @@
       },
     });
     if (res.status === 401) {
+      const err = await res.json().catch(() => ({}));
+      const expired = err.detail && err.detail.toLowerCase().includes('expired');
       authToken = null;
       localStorage.removeItem('token');
-      showAuthModal();
-      throw new Error('Session expired — please log in again');
+      showAuthModal(expired ? 'Your session expired — please log in again.' : null);
+      throw new Error(err.detail || 'Not authenticated');
     }
     return res;
   }
 
-  function showAuthModal() {
+  function showAuthModal(message = null) {
+    switchTab('login');
     document.getElementById('auth-modal').classList.remove('hidden');
     document.getElementById('cards').innerHTML = '';
+    if (message) {
+      document.getElementById('auth-error').textContent = message;
+    }
   }
 
   function switchTab(mode) {
@@ -379,13 +391,14 @@
   }
 
   async function login() {
-    const username = document.getElementById('auth-username').value.trim();
-    const password = document.getElementById('auth-password').value;
+    const username   = document.getElementById('auth-username').value.trim();
+    const password   = document.getElementById('auth-password').value;
+    const rememberMe = document.getElementById('remember-me').checked;
     document.getElementById('auth-error').textContent = '';
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember_me: rememberMe }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -451,10 +464,26 @@
     const res = await fetch('/api/auth/me', {
       headers: { 'Authorization': `Bearer ${authToken}` },
     });
-    if (!res.ok) { authToken = null; localStorage.removeItem('token'); showAuthModal(); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const expired = err.detail && err.detail.toLowerCase().includes('expired');
+      authToken = null;
+      localStorage.removeItem('token');
+      showAuthModal(expired ? 'Your session expired — please log in again.' : null);
+      return;
+    }
     const data = await res.json();
     applyUserUI(data.username, data.is_admin);
     loadSnapshots();
+    // Auto-refresh session every 30 minutes while active
+    setInterval(async () => {
+      if (authToken) {
+        await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` },
+        }).catch(() => {});
+      }
+    }, 30 * 60 * 1000);
   }
 
   let refreshing = new Set();

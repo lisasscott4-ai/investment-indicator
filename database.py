@@ -65,10 +65,12 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS sessions (
-    id         SERIAL PRIMARY KEY,
-    token      TEXT NOT NULL UNIQUE,
-    user_id    TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id          SERIAL PRIMARY KEY,
+    token       TEXT NOT NULL UNIQUE,
+    user_id     TEXT NOT NULL,
+    remember_me INTEGER DEFAULT 1,
+    expires_at  TIMESTAMP,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS assets (
     id                  SERIAL PRIMARY KEY,
@@ -128,10 +130,12 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TEXT DEFAULT (CURRENT_TIMESTAMP)
 );
 CREATE TABLE IF NOT EXISTS sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    token      TEXT NOT NULL UNIQUE,
-    user_id    TEXT NOT NULL,
-    created_at TEXT DEFAULT (CURRENT_TIMESTAMP)
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    token       TEXT NOT NULL UNIQUE,
+    user_id     TEXT NOT NULL,
+    remember_me INTEGER DEFAULT 1,
+    expires_at  TEXT,
+    created_at  TEXT DEFAULT (CURRENT_TIMESTAMP)
 );
 CREATE TABLE IF NOT EXISTS assets (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -198,6 +202,8 @@ def init_db():
         "ALTER TABLE users ADD COLUMN phone TEXT",
         "ALTER TABLE users ADD COLUMN address TEXT",
         "UPDATE users SET status = 'active' WHERE status IS NULL",
+        "ALTER TABLE sessions ADD COLUMN remember_me INTEGER DEFAULT 1",
+        "ALTER TABLE sessions ADD COLUMN expires_at TEXT",
     ]:
         try:
             with engine.begin() as conn:
@@ -263,22 +269,51 @@ def authenticate_user(username: str, password: str):
         return None, None
     return row['user_id'], row.get('status', 'active')
 
-def create_session(user_id: str) -> str:
+def create_session(user_id: str, remember_me: bool = True) -> str:
     token = secrets.token_urlsafe(32)
+    days = 30 if remember_me else 1
+    if IS_POSTGRES:
+        sql = f"INSERT INTO sessions (token, user_id, remember_me, expires_at) VALUES (:token, :uid, :rm, CURRENT_TIMESTAMP + INTERVAL '{days} days')"
+    else:
+        sql = f"INSERT INTO sessions (token, user_id, remember_me, expires_at) VALUES (:token, :uid, :rm, datetime('now', '+{days} days'))"
     with get_db() as conn:
-        conn.execute(
-            text("INSERT INTO sessions (token, user_id) VALUES (:token, :uid)"),
-            {'token': token, 'uid': user_id}
-        )
+        conn.execute(text(sql), {'token': token, 'uid': user_id, 'rm': 1 if remember_me else 0})
     return token
 
 def get_session_user(token: str):
+    if IS_POSTGRES:
+        valid_sql  = "SELECT user_id FROM sessions WHERE token = :t AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
+        expired_sql = "SELECT 1 FROM sessions WHERE token = :t AND expires_at <= CURRENT_TIMESTAMP"
+    else:
+        valid_sql  = "SELECT user_id FROM sessions WHERE token = :t AND (expires_at IS NULL OR expires_at > datetime('now'))"
+        expired_sql = "SELECT 1 FROM sessions WHERE token = :t AND expires_at <= datetime('now')"
     with get_db() as conn:
-        row = _row(conn.execute(
-            text("SELECT user_id FROM sessions WHERE token = :t"),
-            {'t': token}
-        ))
-    return row['user_id'] if row else None
+        row = _row(conn.execute(text(valid_sql), {'t': token}))
+        if row:
+            return row['user_id'], False
+        expired = _row(conn.execute(text(expired_sql), {'t': token}))
+        return None, expired is not None
+
+def refresh_session(token: str):
+    with get_db() as conn:
+        row = _row(conn.execute(text("SELECT remember_me FROM sessions WHERE token = :t"), {'t': token}))
+    if not row:
+        return
+    days = 30 if row.get('remember_me', 1) else 1
+    if IS_POSTGRES:
+        sql = f"UPDATE sessions SET expires_at = CURRENT_TIMESTAMP + INTERVAL '{days} days' WHERE token = :t"
+    else:
+        sql = f"UPDATE sessions SET expires_at = datetime('now', '+{days} days') WHERE token = :t"
+    with get_db() as conn:
+        conn.execute(text(sql), {'t': token})
+
+def clean_expired_sessions():
+    if IS_POSTGRES:
+        sql = "DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP"
+    else:
+        sql = "DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime('now')"
+    with get_db() as conn:
+        conn.execute(text(sql))
 
 def delete_session(token: str):
     with get_db() as conn:
