@@ -173,41 +173,42 @@ CREATE TABLE IF NOT EXISTS recommendations (
 
 def init_db():
     schema = _SCHEMA_PG if IS_POSTGRES else _SCHEMA_SQLITE
+    # Create tables in their own transaction
     with engine.begin() as conn:
         for stmt in schema.strip().split(';'):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(text(stmt))
 
-        # Migrations for existing databases
-        for sql in [
-            "ALTER TABLE assets ADD COLUMN sharesies_available INTEGER DEFAULT 0",
-            "ALTER TABLE assets ADD COLUMN user_id TEXT NOT NULL DEFAULT 'anon'",
-            "ALTER TABLE recommendations ADD COLUMN industry TEXT",
-            "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'",
-            "ALTER TABLE users ADD COLUMN email TEXT",
-            "ALTER TABLE users ADD COLUMN birthday TEXT",
-            "ALTER TABLE users ADD COLUMN phone TEXT",
-            "ALTER TABLE users ADD COLUMN address TEXT",
-            # All pre-existing accounts get active status (approval system is new)
-            "UPDATE users SET status = 'active' WHERE status IS NULL",
-        ]:
-            try:
-                conn.execute(text(sql))
-            except Exception:
-                pass
-
-        # Unique index per user
+    # Each migration runs in its own transaction so a failure doesn't
+    # abort the others (PostgreSQL aborts the whole transaction on error)
+    for sql in [
+        "ALTER TABLE assets ADD COLUMN sharesies_available INTEGER DEFAULT 0",
+        "ALTER TABLE assets ADD COLUMN user_id TEXT NOT NULL DEFAULT 'anon'",
+        "ALTER TABLE recommendations ADD COLUMN industry TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'",
+        "ALTER TABLE users ADD COLUMN email TEXT",
+        "ALTER TABLE users ADD COLUMN birthday TEXT",
+        "ALTER TABLE users ADD COLUMN phone TEXT",
+        "ALTER TABLE users ADD COLUMN address TEXT",
+        "UPDATE users SET status = 'active' WHERE status IS NULL",
+    ]:
         try:
-            conn.execute(text("DROP INDEX IF EXISTS idx_assets_ticker_market"))
+            with engine.begin() as conn:
+                conn.execute(text(sql))
         except Exception:
             pass
+
+    # Indexes each in their own transaction
+    for sql in [
+        "DROP INDEX IF EXISTS idx_assets_ticker_market",
+        ("CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_ticker_market_user "
+         "ON assets(ticker, market, user_id)"),
+    ]:
         try:
-            conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_ticker_market_user "
-                "ON assets(ticker, market, user_id)"
-            ))
+            with engine.begin() as conn:
+                conn.execute(text(sql))
         except Exception:
             pass
 
