@@ -22,6 +22,7 @@ from database import (
     get_session_user, delete_session, get_username,
     is_admin, admin_exists, get_all_users, get_platform_stats,
     get_health_warnings, get_pending_users, approve_user, reject_user,
+    verify_birthday, update_password,
 )
 from analyzer import analyze_asset, suggest_stocks, get_price_preview
 
@@ -57,6 +58,14 @@ class RegisterRequest(BaseModel):
     birthday: str = None
     phone: str = None
     address: str = None
+
+class VerifyBirthdayRequest(BaseModel):
+    username: str
+    birthday: str
+
+class ResetPasswordRequest(BaseModel):
+    username: str
+    new_password: str
 
 def require_user(authorization: str = Header(None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):
@@ -100,6 +109,19 @@ def login(req: AuthRequest):
         raise HTTPException(403, "Your account request was not approved")
     token = create_session(user_id)
     return {"token": token, "username": req.username.lower().strip()}
+
+@app.post("/api/auth/verify-birthday")
+def verify_birthday_endpoint(req: VerifyBirthdayRequest):
+    if not verify_birthday(req.username, req.birthday):
+        raise HTTPException(400, "Username or date of birth is incorrect")
+    return {"ok": True}
+
+@app.post("/api/auth/reset-password")
+def reset_password_endpoint(req: ResetPasswordRequest):
+    if len(req.new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    update_password(req.username, req.new_password)
+    return {"ok": True}
 
 @app.post("/api/auth/logout")
 def logout(authorization: str = Header(None)):

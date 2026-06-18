@@ -90,6 +90,37 @@
         <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password"
           class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-1 focus:outline-none"
           onkeydown="if(event.key==='Enter') doAuth()" />
+        <button type="button" onclick="showForgot()"
+          class="text-xs text-black underline opacity-60 hover:opacity-100 mt-1 mb-1">Forgot password?</button>
+      </div>
+
+      <!-- Forgot password — step 1: verify birthday -->
+      <div id="forgot-fields" class="hidden space-y-3">
+        <p class="text-black text-sm font-medium">Verify your identity</p>
+        <input id="forgot-username" type="text" placeholder="Username"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+        <div>
+          <label class="text-black text-xs mb-1 block">Date of Birth</label>
+          <input id="forgot-birthday" type="date"
+            class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white text-sm focus:outline-none" />
+        </div>
+      </div>
+
+      <!-- Forgot password — step 2: new password -->
+      <div id="reset-fields" class="hidden space-y-3">
+        <p class="text-black text-sm font-medium">Set a new password</p>
+        <input id="reset-password" type="password" placeholder="New password (min 8 chars)"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+        <input id="reset-password2" type="password" placeholder="Confirm new password"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+      </div>
+
+      <!-- Password reset success -->
+      <div id="reset-success" class="hidden text-center py-4">
+        <div class="text-4xl mb-3">✅</div>
+        <p class="font-heading font-bold text-black text-lg mb-2">Password Reset!</p>
+        <p class="text-black text-sm mb-4">Your password has been updated. You can now log in.</p>
+        <button onclick="switchTab('login')" class="bg-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Back to Login</button>
       </div>
 
       <!-- Register fields (shown when register tab active) -->
@@ -273,10 +304,79 @@
     document.getElementById('auth-pending').classList.add('hidden');
     document.getElementById('login-fields').classList.toggle('hidden', mode !== 'login');
     document.getElementById('register-fields').classList.toggle('hidden', mode !== 'register');
-    document.getElementById('auth-submit').classList.toggle('hidden', false);
+    document.getElementById('forgot-fields').classList.add('hidden');
+    document.getElementById('reset-fields').classList.add('hidden');
+    document.getElementById('reset-success').classList.add('hidden');
+    document.getElementById('auth-submit').classList.remove('hidden');
   }
 
-  function doAuth() { authMode === 'login' ? login() : register(); }
+  function showForgot() {
+    authMode = 'forgot';
+    document.getElementById('login-fields').classList.add('hidden');
+    document.getElementById('forgot-fields').classList.remove('hidden');
+    document.getElementById('auth-submit').textContent = 'Verify Birthday';
+    document.getElementById('auth-error').textContent = '';
+  }
+
+  function doAuth() {
+    if (authMode === 'login') login();
+    else if (authMode === 'register') register();
+    else if (authMode === 'forgot') verifyBirthday();
+    else if (authMode === 'reset') resetPassword();
+  }
+
+  async function verifyBirthday() {
+    const username = document.getElementById('forgot-username').value.trim();
+    const birthday = document.getElementById('forgot-birthday').value;
+    document.getElementById('auth-error').textContent = '';
+    if (!username || !birthday) {
+      document.getElementById('auth-error').textContent = 'Please enter your username and date of birth';
+      return;
+    }
+    const res = await fetch('/api/auth/verify-birthday', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, birthday }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('auth-error').textContent = err.detail || 'Could not verify identity';
+      return;
+    }
+    // Birthday matched — show new password fields
+    window._resetUsername = username;
+    authMode = 'reset';
+    document.getElementById('forgot-fields').classList.add('hidden');
+    document.getElementById('reset-fields').classList.remove('hidden');
+    document.getElementById('auth-submit').textContent = 'Set New Password';
+  }
+
+  async function resetPassword() {
+    const password  = document.getElementById('reset-password').value;
+    const password2 = document.getElementById('reset-password2').value;
+    document.getElementById('auth-error').textContent = '';
+    if (password.length < 8) {
+      document.getElementById('auth-error').textContent = 'Password must be at least 8 characters';
+      return;
+    }
+    if (password !== password2) {
+      document.getElementById('auth-error').textContent = 'Passwords do not match';
+      return;
+    }
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: window._resetUsername, new_password: password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('auth-error').textContent = err.detail || 'Reset failed';
+      return;
+    }
+    document.getElementById('reset-fields').classList.add('hidden');
+    document.getElementById('auth-submit').classList.add('hidden');
+    document.getElementById('reset-success').classList.remove('hidden');
+  }
 
   async function login() {
     const username = document.getElementById('auth-username').value.trim();

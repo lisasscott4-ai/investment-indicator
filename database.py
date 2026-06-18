@@ -299,6 +299,21 @@ def admin_exists() -> bool:
         row = _row(conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")))
     return row is not None
 
+def verify_birthday(username: str, birthday: str) -> bool:
+    with get_db() as conn:
+        row = _row(conn.execute(
+            text("SELECT birthday FROM users WHERE username = :u"),
+            {'u': username.lower().strip()}
+        ))
+    return bool(row and row.get('birthday') and row['birthday'] == birthday)
+
+def update_password(username: str, new_password: str):
+    password_hash = _hash_password(new_password)
+    with get_db() as conn:
+        conn.execute(text(
+            "UPDATE users SET password_hash = :pw WHERE username = :u"
+        ), {'pw': password_hash, 'u': username.lower().strip()})
+
 def get_pending_users():
     with get_db() as conn:
         return _rows(conn.execute(text(
