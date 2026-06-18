@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool, NullPool
 
 # ── Engine setup ──────────────────────────────────────────────────────────────
 
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///investment.db')
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///investment.db').strip().strip('"').strip("'")
 
 # Railway/Render supply postgres:// URLs; SQLAlchemy needs postgresql://
 if DATABASE_URL.startswith('postgres://'):
@@ -16,9 +16,14 @@ if DATABASE_URL.startswith('postgres://'):
 
 IS_POSTGRES = DATABASE_URL.startswith('postgresql')
 
+print(f"[DB] Connecting to: {'PostgreSQL' if IS_POSTGRES else 'SQLite'}")
+
 if IS_POSTGRES:
     engine = create_engine(DATABASE_URL, poolclass=NullPool)
 else:
+    if not DATABASE_URL.startswith('sqlite'):
+        print(f"[DB] WARNING: Unexpected DATABASE_URL format, falling back to SQLite")
+        DATABASE_URL = 'sqlite:///investment.db'
     engine = create_engine(
         DATABASE_URL,
         connect_args={'check_same_thread': False},
