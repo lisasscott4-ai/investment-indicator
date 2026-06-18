@@ -508,6 +508,10 @@ def get_active_assets(user_id: str = None):
             "SELECT * FROM assets WHERE active = 1 ORDER BY added_at DESC"
         )))
 
+def _f(v):
+    """Convert numpy/non-standard numeric types to plain Python float."""
+    return float(v) if v is not None else None
+
 def save_snapshot(data: dict):
     with get_db() as conn:
         conn.execute(text("""
@@ -521,14 +525,14 @@ def save_snapshot(data: dict):
                  :risk, :confidence, :horizon, :reasoning, :signals)
         """), {
             'asset_id':  data['asset_id'],
-            'price':     data['price'],
-            'pct':       data['price_change_pct'],
-            'momentum':  data['momentum_score'],
-            'financial': data['financial_score'],
-            'sentiment': data['sentiment_score'],
-            'industry':  data['industry_score'],
-            'valuation': data['valuation_score'],
-            'total':     data['total_score'],
+            'price':     _f(data['price']),
+            'pct':       _f(data['price_change_pct']),
+            'momentum':  _f(data['momentum_score']),
+            'financial': _f(data['financial_score']),
+            'sentiment': _f(data['sentiment_score']),
+            'industry':  _f(data['industry_score']),
+            'valuation': _f(data['valuation_score']),
+            'total':     _f(data['total_score']),
             'risk':      data['risk_level'],
             'confidence': data['confidence'],
             'horizon':   data['time_horizon'],
