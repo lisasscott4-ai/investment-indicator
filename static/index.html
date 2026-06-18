@@ -188,7 +188,7 @@
           </svg>
           Discover
         </button>
-        <button onclick="toggleGuide()"
+        <button id="guide-btn" onclick="toggleGuide()"
           class="flex items-center gap-2 bg-pink-200 hover:bg-pink-300 text-black px-4 py-2 rounded-lg text-sm font-medium transition-colors">
           ? Guide
         </button>
@@ -204,7 +204,7 @@
     </div>
 
     <!-- Add Asset -->
-    <div class="bg-card border border-border rounded-xl p-4 mb-8">
+    <div id="add-section" class="bg-card border border-border rounded-xl p-4 mb-8">
       <p class="text-white text-sm font-medium mb-3">Add to Watchlist</p>
       <div class="flex gap-3 flex-wrap">
         <input id="ticker-input" type="text" placeholder="Ticker (e.g. AAPL, SPK, BHP)"
@@ -441,6 +441,11 @@
   function afterAuth(username, admin = false) {
     applyUserUI(username, admin);
     loadSnapshots();
+    const key = 'tutorial_done_' + username;
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, '1');
+      setTimeout(startTutorial, 800);
+    }
   }
 
   async function logout() {
@@ -1162,5 +1167,159 @@
     <p>Yahoo, Google, and Sharesies links open that stock's page on those sites for independent price checking, news, and buying.</p>
   </div>
 </div>
+
+<!-- Tutorial Overlay -->
+<div id="tutorial-overlay" class="hidden fixed inset-0 z-[998]" style="background:rgba(0,0,0,0.72)"></div>
+<div id="tutorial-box" class="hidden fixed z-[1000] w-72 bg-pink-50 border-2 border-pink-400 rounded-2xl shadow-2xl p-5">
+  <div class="flex items-center justify-between mb-2">
+    <span id="tutorial-step-label" class="text-xs text-pink-500 font-semibold uppercase tracking-wide"></span>
+    <button onclick="endTutorial()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+  </div>
+  <h3 id="tutorial-title" class="font-heading font-bold text-black text-base mb-2"></h3>
+  <p id="tutorial-text" class="text-slate-700 text-sm leading-relaxed mb-4"></p>
+  <div class="flex items-center justify-between gap-2">
+    <button onclick="tutorialPrev()" id="tutorial-prev"
+      class="text-xs text-pink-600 hover:text-pink-800 font-medium disabled:opacity-30">← Back</button>
+    <div id="tutorial-dots" class="flex gap-1.5"></div>
+    <button onclick="tutorialNext()" id="tutorial-next"
+      class="bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors">Next →</button>
+  </div>
+</div>
+
+<style>
+  .tutorial-highlight {
+    position: relative;
+    z-index: 999 !important;
+    border-radius: 10px;
+    outline: 3px solid #ec4899;
+    outline-offset: 5px;
+    box-shadow: 0 0 0 5px rgba(236,72,153,0.25), 0 0 40px rgba(236,72,153,0.2);
+    transition: outline 0.2s, box-shadow 0.2s;
+  }
+</style>
+
+<script>
+  const TUTORIAL_STEPS = [
+    { target: null, pos: 'center',
+      title: 'Welcome to Investment Indicator!',
+      text: "Let's take a quick tour so you know where everything is. It only takes a minute." },
+    { target: '#add-section', pos: 'below',
+      title: 'Add Stocks to Your Watchlist',
+      text: 'Type a ticker (like AAPL or SPK), choose your market, and click Add. The AI will analyse it automatically within about a minute.' },
+    { target: '#discover-btn', pos: 'below',
+      title: 'Discover New Stocks',
+      text: 'Click Discover to get AI-powered stock suggestions based on what you already own — great for finding your next investment.' },
+    { target: 'a[href="/recommendations.html"]', pos: 'below',
+      title: 'Recommendations Page',
+      text: 'Browse AI-curated stocks and ETFs worth watching, with filters by market, theme, and industry.' },
+    { target: '#guide-btn', pos: 'below',
+      title: 'How to Read Your Cards',
+      text: 'Click Guide to open a panel that explains every metric on a stock card — scores, risk levels, Monte Carlo forecasts, and more.' },
+    { target: '#refresh-btn', pos: 'below',
+      title: 'Refresh Your Data',
+      text: 'Click Refresh All to update every stock with the latest market data and fresh AI analysis. Data auto-refreshes every few hours too.' },
+    { target: '#cards', pos: 'above',
+      title: 'Your Stock Cards',
+      text: 'Each card shows a score out of 100, price movement, risk level, and AI reasoning. Click the history icon on a card to see past scores.' },
+    { target: null, pos: 'center',
+      title: "You're all set!",
+      text: 'Add your first stock to get started. The AI will have it scored within about a minute.',
+      last: true },
+  ];
+
+  let tutorialStep = 0;
+  let tutorialActive = false;
+  let _prevHighlight = null;
+
+  function startTutorial() {
+    tutorialStep = 0;
+    tutorialActive = true;
+    document.getElementById('tutorial-overlay').classList.remove('hidden');
+    renderTutorialStep();
+  }
+
+  function endTutorial() {
+    tutorialActive = false;
+    document.getElementById('tutorial-overlay').classList.add('hidden');
+    document.getElementById('tutorial-box').classList.add('hidden');
+    _clearHighlight();
+  }
+
+  function _clearHighlight() {
+    if (_prevHighlight) {
+      _prevHighlight.classList.remove('tutorial-highlight');
+      _prevHighlight = null;
+    }
+  }
+
+  function renderTutorialStep() {
+    const step = TUTORIAL_STEPS[tutorialStep];
+    const box = document.getElementById('tutorial-box');
+
+    _clearHighlight();
+
+    // Step label + content
+    document.getElementById('tutorial-step-label').textContent = `Step ${tutorialStep + 1} of ${TUTORIAL_STEPS.length}`;
+    document.getElementById('tutorial-title').textContent = step.title;
+    document.getElementById('tutorial-text').textContent = step.text;
+    document.getElementById('tutorial-prev').style.visibility = tutorialStep === 0 ? 'hidden' : 'visible';
+
+    const nextBtn = document.getElementById('tutorial-next');
+    nextBtn.textContent = step.last ? 'Get Started!' : 'Next →';
+
+    // Dots
+    document.getElementById('tutorial-dots').innerHTML = TUTORIAL_STEPS.map((_, i) =>
+      `<div class="w-1.5 h-1.5 rounded-full ${i === tutorialStep ? 'bg-pink-500' : 'bg-pink-200'}"></div>`
+    ).join('');
+
+    // Highlight target
+    let rect = null;
+    if (step.target) {
+      const el = document.querySelector(step.target);
+      if (el) {
+        el.classList.add('tutorial-highlight');
+        _prevHighlight = el;
+        rect = el.getBoundingClientRect();
+      }
+    }
+
+    box.classList.remove('hidden');
+
+    // Position tooltip
+    const boxW = 288, boxH = 200;
+    const vw = window.innerWidth, vh = window.innerHeight;
+
+    if (!rect || step.pos === 'center') {
+      box.style.left = Math.round((vw - boxW) / 2) + 'px';
+      box.style.top  = Math.round((vh - boxH) / 2) + 'px';
+    } else if (step.pos === 'below') {
+      let left = Math.round(rect.left + rect.width / 2 - boxW / 2);
+      left = Math.max(12, Math.min(left, vw - boxW - 12));
+      let top = Math.round(rect.bottom + 14);
+      if (top + boxH > vh - 12) top = Math.round(rect.top - boxH - 14);
+      box.style.left = left + 'px';
+      box.style.top  = top + 'px';
+    } else if (step.pos === 'above') {
+      let left = Math.round(rect.left + rect.width / 2 - boxW / 2);
+      left = Math.max(12, Math.min(left, vw - boxW - 12));
+      let top = Math.round(rect.top - boxH - 14);
+      if (top < 12) top = Math.round(rect.bottom + 14);
+      box.style.left = left + 'px';
+      box.style.top  = top + 'px';
+    }
+  }
+
+  function tutorialNext() {
+    if (tutorialStep >= TUTORIAL_STEPS.length - 1) { endTutorial(); return; }
+    tutorialStep++;
+    renderTutorialStep();
+  }
+
+  function tutorialPrev() {
+    if (tutorialStep <= 0) return;
+    tutorialStep--;
+    renderTutorialStep();
+  }
+</script>
 </body>
 </html>
