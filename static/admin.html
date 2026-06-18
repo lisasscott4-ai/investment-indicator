@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Investment Indicator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#db2777',
+            card: '#f472b6',
+            border: '#f9a8d4',
+          },
+          fontFamily: {
+            heading: ['"Playfair Display"', 'serif'],
+            sans: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #fdf2f8; font-family: 'Inter', sans-serif; }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="text-slate-900 min-h-screen">
+
+  <div class="max-w-6xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8 flex-wrap gap-3">
+      <div>
+        <h1 class="font-heading text-2xl font-bold text-black">Admin Dashboard</h1>
+        <p class="text-black text-sm mt-1">Platform overview and user management.</p>
+      </div>
+      <div class="flex gap-2">
+        <a href="/"
+          class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          ← Watchlist
+        </a>
+        <button onclick="logout()"
+          class="bg-pink-200 hover:bg-pink-300 text-black px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          Logout
+        </button>
+      </div>
+    </div>
+
+    <!-- Stats row -->
+    <div id="stats-row" class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6"></div>
+
+    <!-- Health warnings -->
+    <div id="health-section" class="hidden mb-6">
+      <div class="bg-card border border-border rounded-xl p-6">
+        <h2 class="font-heading font-bold text-lg text-black mb-4">Watchlist Health</h2>
+        <div id="health-body"></div>
+      </div>
+    </div>
+
+    <!-- Setup admin (shown only if no admin exists) -->
+    <div id="setup-section" class="hidden bg-card border border-border rounded-xl p-6 mb-8">
+      <h2 class="font-heading font-bold text-lg text-black mb-1">Create Admin Account</h2>
+      <p class="text-black text-sm mb-4">No admin account exists yet. Set one up here.</p>
+      <div class="flex gap-3 flex-wrap">
+        <input id="setup-username" type="text" placeholder="Username"
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none w-44" />
+        <input id="setup-password" type="password" placeholder="Password (min 8)"
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none w-48" />
+        <button onclick="setupAdmin()"
+          class="bg-pink-700 hover:bg-pink-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          Create Admin
+        </button>
+        <span id="setup-msg" class="text-sm self-center text-black"></span>
+      </div>
+    </div>
+
+    <!-- Users table -->
+    <div class="bg-card border border-border rounded-xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-heading font-bold text-lg text-black">Users</h2>
+        <button onclick="loadData()"
+          class="text-sm bg-surface hover:bg-pink-800 text-white px-3 py-1.5 rounded-lg transition-colors">
+          Refresh
+        </button>
+      </div>
+      <div id="users-table">
+        <p class="text-black text-sm text-center py-8">Loading...</p>
+      </div>
+    </div>
+
+    <!-- User detail panel -->
+    <div id="user-detail" class="hidden bg-card border border-border rounded-xl p-6 mt-6 fade-in">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="detail-title" class="font-heading font-bold text-lg text-black"></h2>
+        <button onclick="closeDetail()" class="text-black hover:text-pink-900 text-xl font-bold">&times;</button>
+      </div>
+      <div id="detail-body"></div>
+    </div>
+
+  </div>
+
+<script>
+  let authToken = localStorage.getItem('token');
+
+  async function apiFetch(url, opts = {}) {
+    const res = await fetch(url, {
+      ...opts,
+      headers: {
+        ...(opts.headers || {}),
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+      },
+    });
+    if (res.status === 401 || res.status === 403) {
+      window.location.href = '/';
+    }
+    return res;
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
+    }).catch(() => {});
+    localStorage.removeItem('token');
+    window.location.href = '/';
+  }
+
+  function statCard(label, value, color = 'text-black') {
+    return `
+    <div class="bg-card border border-border rounded-xl p-4 text-center">
+      <p class="text-black text-xs mb-1">${label}</p>
+      <p class="font-heading font-bold text-2xl ${color}">${value}</p>
+    </div>`;
+  }
+
+  function renderHealth(h) {
+    const section = document.getElementById('health-section');
+    const body = document.getElementById('health-body');
+    const total = h.no_data.length + h.stale.length;
+
+    if (total === 0) {
+      section.classList.remove('hidden');
+      body.innerHTML = '<p class="text-green-700 text-sm font-medium">All watchlist items are healthy — no issues found.</p>';
+      return;
+    }
+
+    const noDataHtml = h.no_data.length ? `
+      <div class="mb-4">
+        <p class="text-red-800 font-semibold text-sm mb-2">No data ever received (${h.no_data.length})</p>
+        <p class="text-black text-xs mb-2">These tickers have never returned a successful analysis — likely invalid or delisted.</p>
+        <div class="flex flex-wrap gap-2">
+          ${h.no_data.map(r => `
+          <div class="bg-red-100 border border-red-300 rounded-lg px-3 py-2 text-sm">
+            <span class="text-red-900 font-bold">${r.ticker}</span>
+            <span class="text-red-600 text-xs ml-1">${r.market}</span>
+            <p class="text-red-700 text-xs">${r.username}</p>
+          </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    const staleHtml = h.stale.length ? `
+      <div>
+        <p class="text-amber-800 font-semibold text-sm mb-2">Stale data — no update in 2+ days (${h.stale.length})</p>
+        <p class="text-black text-xs mb-2">These had data before but haven't refreshed recently.</p>
+        <div class="flex flex-wrap gap-2">
+          ${h.stale.map(r => `
+          <div class="bg-amber-100 border border-amber-300 rounded-lg px-3 py-2 text-sm">
+            <span class="text-amber-900 font-bold">${r.ticker}</span>
+            <span class="text-amber-600 text-xs ml-1">${r.market}</span>
+            <p class="text-amber-700 text-xs">${r.username}</p>
+            <p class="text-amber-600 text-xs">Last: ${new Date(r.last_snapshot + 'Z').toLocaleDateString()}</p>
+          </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    section.classList.remove('hidden');
+    body.innerHTML = noDataHtml + staleHtml;
+  }
+
+  async function loadData() {
+    // Check admin access
+    const me = await fetch('/api/auth/me', {
+      headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
+    });
+    if (!me.ok) { window.location.href = '/'; return; }
+    const meData = await me.json();
+    if (!meData.is_admin) { window.location.href = '/'; return; }
+
+    // Stats + health in parallel
+    const [statsRes, healthRes] = await Promise.all([
+      apiFetch('/api/admin/stats'),
+      apiFetch('/api/admin/health'),
+    ]);
+
+    if (statsRes.ok) {
+      const s = await statsRes.json();
+      document.getElementById('stats-row').innerHTML = [
+        statCard('Total Users', s.total_users),
+        statCard('Active Watchlists', s.total_assets),
+        statCard('Snapshots Taken', s.total_snapshots),
+        statCard('Recommendations', s.total_recommendations),
+        statCard('Active Today', s.active_today, 'text-green-700'),
+      ].join('');
+    }
+
+    if (healthRes.ok) {
+      const h = await healthRes.json();
+      renderHealth(h);
+    }
+
+    // Users
+    const usersRes = await apiFetch('/api/admin/users');
+    if (!usersRes.ok) { return; }
+    const users = await usersRes.json();
+
+    if (!users.length) {
+      document.getElementById('users-table').innerHTML = '<p class="text-black text-sm text-center py-6">No users yet.</p>';
+      return;
+    }
+
+    document.getElementById('users-table').innerHTML = `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-black border-b border-border">
+              <th class="pb-2 font-semibold">Username</th>
+              <th class="pb-2 font-semibold">Role</th>
+              <th class="pb-2 font-semibold">Joined</th>
+              <th class="pb-2 font-semibold">Watchlist</th>
+              <th class="pb-2 font-semibold">Snapshots</th>
+              <th class="pb-2 font-semibold">Last Active</th>
+              <th class="pb-2 font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${users.map(u => `
+            <tr class="border-b border-border last:border-0 hover:bg-pink-300/20 transition-colors" id="row-${u.user_id}">
+              <td class="py-2.5 text-black font-medium">${u.username}</td>
+              <td class="py-2.5">
+                ${u.is_admin
+                  ? '<span class="bg-pink-700 text-white text-xs px-2 py-0.5 rounded">Admin</span>'
+                  : '<span class="bg-slate-200 text-slate-700 text-xs px-2 py-0.5 rounded">User</span>'}
+              </td>
+              <td class="py-2.5 text-black">${u.created_at ? new Date(u.created_at + 'Z').toLocaleDateString() : '—'}</td>
+              <td class="py-2.5 text-black">${u.asset_count} stocks</td>
+              <td class="py-2.5 text-black">${u.snapshot_count}</td>
+              <td class="py-2.5 text-black">${u.last_active ? new Date(u.last_active + 'Z').toLocaleString() : 'Never'}</td>
+              <td class="py-2.5 flex gap-2">
+                <button onclick="viewUser('${u.user_id}', '${u.username}')"
+                  class="text-xs bg-surface hover:bg-pink-800 text-white px-2 py-1 rounded transition-colors">
+                  View
+                </button>
+                ${!u.is_admin ? `
+                <button onclick="deleteUser('${u.user_id}', '${u.username}')"
+                  class="text-xs bg-red-800 hover:bg-red-700 text-white px-2 py-1 rounded transition-colors">
+                  Delete
+                </button>` : ''}
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  async function viewUser(userId, username) {
+    document.getElementById('user-detail').classList.remove('hidden');
+    document.getElementById('detail-title').textContent = `${username}'s Watchlist`;
+    document.getElementById('detail-body').innerHTML = '<p class="text-black text-sm">Loading...</p>';
+
+    const res = await apiFetch(`/api/admin/users/${userId}/assets`);
+    if (!res.ok) { document.getElementById('detail-body').innerHTML = '<p class="text-black text-sm">Failed to load.</p>'; return; }
+    const assets = await res.json();
+
+    if (!assets.length) {
+      document.getElementById('detail-body').innerHTML = '<p class="text-black text-sm">No active assets.</p>';
+      return;
+    }
+    document.getElementById('detail-body').innerHTML = `
+      <div class="flex flex-wrap gap-2">
+        ${assets.map(a => `
+        <div class="bg-surface rounded-lg px-3 py-2 text-sm">
+          <span class="text-white font-bold">${a.ticker}</span>
+          <span class="text-pink-200 text-xs ml-1">${a.market}</span>
+          ${a.name ? `<p class="text-pink-200 text-xs">${a.name}</p>` : ''}
+        </div>`).join('')}
+      </div>`;
+  }
+
+  function closeDetail() {
+    document.getElementById('user-detail').classList.add('hidden');
+  }
+
+  async function deleteUser(userId, username) {
+    if (!confirm(`Delete account "${username}"? This will remove their watchlist. This cannot be undone.`)) return;
+    const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+    if (res.ok) {
+      document.getElementById(`row-${userId}`)?.remove();
+      closeDetail();
+      loadData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || 'Failed to delete user');
+    }
+  }
+
+  async function setupAdmin() {
+    const username = document.getElementById('setup-username').value.trim();
+    const password = document.getElementById('setup-password').value;
+    const msg = document.getElementById('setup-msg');
+    const res = await fetch('/api/admin/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      msg.textContent = err.detail || 'Failed';
+      msg.className = 'text-sm self-center text-red-800';
+      return;
+    }
+    const { token } = await res.json();
+    authToken = token;
+    localStorage.setItem('token', token);
+    msg.textContent = 'Admin account created — reloading...';
+    msg.className = 'text-sm self-center text-green-800';
+    setTimeout(() => window.location.reload(), 1200);
+  }
+
+  // Check if admin setup is needed (no auth required for this check)
+  async function checkSetup() {
+    const statusRes = await fetch('/api/admin/setup-status');
+    const { setup_needed } = await statusRes.json();
+
+    if (setup_needed) {
+      document.getElementById('setup-section').classList.remove('hidden');
+      document.getElementById('users-table').innerHTML = '<p class="text-black text-sm text-center py-6">Create an admin account above to get started.</p>';
+      document.getElementById('stats-row').innerHTML = '';
+      return;
+    }
+
+    if (!authToken) { window.location.href = '/'; return; }
+    const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${authToken}` } });
+    if (!me.ok) { window.location.href = '/'; return; }
+    const meData = await me.json();
+    if (!meData.is_admin) { window.location.href = '/'; return; }
+
+    loadData();
+  }
+
+  checkSetup();
+</script>
+</body>
+</html>

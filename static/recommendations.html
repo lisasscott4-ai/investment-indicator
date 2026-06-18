@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recommendations — Investment Indicator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#db2777',
+            card: '#f472b6',
+            border: '#f9a8d4',
+          },
+          fontFamily: {
+            heading: ['"Playfair Display"', 'serif'],
+            sans: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #fdf2f8; font-family: 'Inter', sans-serif; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="text-slate-100 min-h-screen">
+
+  <div id="app" class="max-w-5xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div>
+        <h1 class="font-heading text-2xl font-bold text-black">Recommendations</h1>
+        <p class="text-black text-sm mt-1">Upcoming stocks &amp; ETFs that could be worth investing into.</p>
+      </div>
+      <div class="flex gap-2">
+        <a href="/"
+          class="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          ← Watchlist
+        </a>
+        <button onclick="refreshRecommendations()" id="refresh-btn"
+          class="flex items-center gap-2 bg-pink-700 hover:bg-pink-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Generate New Recommendations
+        </button>
+      </div>
+    </div>
+
+    <!-- Disclaimer -->
+    <div class="bg-amber-950 border border-amber-800 rounded-lg px-4 py-2 mb-6 text-amber-300 text-xs">
+      AI-generated, for informational purposes only. Not financial advice. Always do your own research before investing.
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-card border border-border rounded-xl p-4 mb-6 flex gap-3 flex-wrap items-center">
+      <span class="text-white text-sm font-medium">Filter:</span>
+      <select id="filter-market" onchange="applyFilters()"
+        class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+        <option value="">All Markets</option>
+        <option value="US">US</option>
+        <option value="ASX">ASX</option>
+        <option value="NZX">NZX</option>
+      </select>
+      <select id="filter-theme" onchange="applyFilters()"
+        class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+        <option value="">All Themes</option>
+        <option value="growth">Growth</option>
+        <option value="dividend">Dividend</option>
+        <option value="defensive">Defensive</option>
+        <option value="speculative">Speculative</option>
+        <option value="ETF">ETF</option>
+      </select>
+      <select id="filter-industry" onchange="applyFilters()"
+        class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+        <option value="">All Industries</option>
+      </select>
+      <select id="filter-performance" onchange="applyFilters()"
+        class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+        <option value="">Any Performance</option>
+        <option value="up">Up since recommended</option>
+        <option value="down">Down since recommended</option>
+      </select>
+      <button onclick="resetFilters()" class="text-white text-sm underline hover:text-pink-100">Clear</button>
+    </div>
+
+    <div id="recs-body">
+      <div class="text-black text-sm text-center py-12">Loading recommendations...</div>
+    </div>
+
+  </div>
+
+<script>
+  let authToken = localStorage.getItem('token');
+
+  async function apiFetch(url, opts = {}) {
+    const res = await fetch(url, {
+      ...opts,
+      headers: {
+        ...(opts.headers || {}),
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+      },
+    });
+    if (res.status === 401) {
+      authToken = null;
+      localStorage.removeItem('token');
+      window.location.href = '/';
+    }
+    return res;
+  }
+
+  const THEME_COLORS = {
+    growth:      'bg-blue-800 text-blue-200 border-blue-600',
+    dividend:    'bg-green-800 text-green-200 border-green-600',
+    defensive:   'bg-pink-900 text-pink-200 border-pink-700',
+    speculative: 'bg-orange-800 text-orange-200 border-orange-600',
+    ETF:         'bg-purple-800 text-purple-200 border-purple-600',
+  };
+
+  let currentRecs = [];
+
+  function renderRec(r, idx) {
+    const marketLabel = { US: 'US', NYSE: 'US', NASDAQ: 'US', ASX: 'ASX', NZX: 'NZX' }[r.market] || r.market;
+    const themeCls = THEME_COLORS[r.theme] || THEME_COLORS.defensive;
+    const hasChange = r.change_pct != null;
+    const changeCls = hasChange ? (r.change_pct >= 0 ? 'text-green-700' : 'text-red-700') : 'text-black';
+    const changeText = hasChange ? `${r.change_pct >= 0 ? '+' : ''}${r.change_pct.toFixed(2)}% since recommended` : 'Live price unavailable';
+    const recommendedAt = r.created_at ? new Date(r.created_at + 'Z').toLocaleDateString() : '';
+
+    return `
+    <div class="bg-card border border-border rounded-xl p-4 mb-3 fade-in">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="font-heading font-bold text-white text-base">${r.ticker}</span>
+            <span class="text-xs bg-pink-900 text-pink-200 px-2 py-0.5 rounded">${marketLabel}</span>
+            <span class="text-xs border px-2 py-0.5 rounded ${themeCls}">${r.theme}</span>
+            ${r.industry ? `<span class="text-xs bg-slate-700 text-slate-200 px-2 py-0.5 rounded">${r.industry}</span>` : ''}
+          </div>
+          ${r.company_name ? `<p class="text-black text-sm">${r.company_name}</p>` : ''}
+          <div class="flex items-center gap-3 mt-1 flex-wrap text-sm">
+            ${r.price_at_rec != null ? `<span class="text-black">Recommended at ${r.price_at_rec.toFixed(2)}</span>` : ''}
+            ${r.current_price != null ? `<span class="text-black">Now ${r.current_price.toFixed(2)}</span>` : ''}
+            <span class="${changeCls} font-medium">${changeText}</span>
+          </div>
+          <p class="text-black text-sm mt-2">${r.why_interesting}</p>
+          ${recommendedAt ? `<p class="text-black text-xs mt-1 opacity-70">Recommended ${recommendedAt}</p>` : ''}
+        </div>
+        <button onclick="addFromRec(${idx})"
+          id="rec-add-${idx}"
+          class="shrink-0 bg-indigo-700 hover:bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap">
+          + Add to Watchlist
+        </button>
+      </div>
+    </div>`;
+  }
+
+  async function loadRecommendations() {
+    const body = document.getElementById('recs-body');
+    try {
+      const res = await apiFetch('/api/recommendations');
+      if (!res.ok) throw new Error(await res.text());
+      currentRecs = await res.json();
+      if (!currentRecs.length) {
+        body.innerHTML = `
+          <div class="text-black text-sm text-center py-12">
+            No recommendations yet. Click "Generate New Recommendations" to get started.
+          </div>`;
+        return;
+      }
+      populateIndustryFilter();
+      applyFilters();
+    } catch (e) {
+      body.innerHTML = `<p class="text-red-700 text-sm py-8 text-center">Failed to load recommendations: ${e.message}</p>`;
+    }
+  }
+
+  function populateIndustryFilter() {
+    const select = document.getElementById('filter-industry');
+    const current = select.value;
+    const industries = [...new Set(currentRecs.map(r => r.industry).filter(Boolean))].sort();
+    select.innerHTML = '<option value="">All Industries</option>' +
+      industries.map(ind => `<option value="${ind}">${ind}</option>`).join('');
+    if (industries.includes(current)) select.value = current;
+  }
+
+  function applyFilters() {
+    const body = document.getElementById('recs-body');
+    const market = document.getElementById('filter-market').value;
+    const theme = document.getElementById('filter-theme').value;
+    const industry = document.getElementById('filter-industry').value;
+    const performance = document.getElementById('filter-performance').value;
+
+    const indexed = currentRecs
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => {
+        if (market && r.market !== market) return false;
+        if (theme && r.theme !== theme) return false;
+        if (industry && r.industry !== industry) return false;
+        if (performance === 'up' && !(r.change_pct != null && r.change_pct >= 0)) return false;
+        if (performance === 'down' && !(r.change_pct != null && r.change_pct < 0)) return false;
+        return true;
+      });
+
+    if (!indexed.length) {
+      body.innerHTML = `<div class="text-black text-sm text-center py-12">No recommendations match these filters.</div>`;
+      return;
+    }
+    body.innerHTML = indexed.map(({ r, i }) => renderRec(r, i)).join('');
+  }
+
+  function resetFilters() {
+    document.getElementById('filter-market').value = '';
+    document.getElementById('filter-theme').value = '';
+    document.getElementById('filter-industry').value = '';
+    document.getElementById('filter-performance').value = '';
+    applyFilters();
+  }
+
+  async function refreshRecommendations() {
+    const btn = document.getElementById('refresh-btn');
+    const icon = document.getElementById('refresh-icon');
+    btn.disabled = true;
+    icon.classList.add('spin');
+    document.getElementById('recs-body').innerHTML = `
+      <div class="flex items-center justify-center gap-3 py-16 text-black">
+        <svg class="spin w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Generating recommendations — this takes about 10 seconds...
+      </div>`;
+    try {
+      const res = await apiFetch('/api/recommendations/refresh', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+      await loadRecommendations();
+    } catch (e) {
+      document.getElementById('recs-body').innerHTML = `<p class="text-red-700 text-sm py-8 text-center">Failed to generate recommendations: ${e.message}</p>`;
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove('spin');
+    }
+  }
+
+  async function addFromRec(idx) {
+    const r = currentRecs[idx];
+    if (!r) return;
+    const btn = document.getElementById(`rec-add-${idx}`);
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+    try {
+      const res = await apiFetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: r.ticker, market: r.market, sharesies_available: true })
+      });
+      if (!res.ok) {
+        btn.textContent = 'Error';
+        return;
+      }
+      btn.textContent = 'Added ✓';
+      btn.classList.replace('bg-indigo-700', 'bg-green-800');
+      btn.classList.replace('hover:bg-indigo-600', 'hover:bg-green-800');
+    } catch {
+      btn.textContent = 'Error';
+    }
+  }
+
+  if (!authToken) { window.location.href = '/'; } else { loadRecommendations(); }
+</script>
+</body>
+</html>

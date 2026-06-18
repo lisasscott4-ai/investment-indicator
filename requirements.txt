@@ -1,0 +1,11 @@
+anthropic
+APScheduler
+fastapi
+numpy
+pandas
+psycopg2-binary
+python-dotenv
+requests
+sqlalchemy
+uvicorn[standard]
+yfinance

@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Investment Indicator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#db2777',
+            card: '#f472b6',
+            border: '#f9a8d4',
+          },
+          fontFamily: {
+            heading: ['"Playfair Display"', 'serif'],
+            sans: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #fdf2f8; font-family: 'Inter', sans-serif; }
+    .score-ring {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; font-weight: 700;
+      border: 3px solid;
+    }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Guide panel */
+    #guide-panel {
+      position: fixed; top: 0; right: 0; height: 100vh;
+      width: 320px; transform: translateX(100%);
+      transition: transform 0.3s ease; z-index: 40;
+      background: #fce7f3; border-left: 2px solid #f9a8d4;
+      overflow-y: auto; padding: 1.5rem 1.25rem;
+      font-family: 'Inter', sans-serif;
+    }
+    #guide-panel.open { transform: translateX(0); }
+    body.guide-pinned { padding-right: 320px; }
+    body.guide-pinned #guide-panel { position: fixed; }
+    .guide-section { border-left: 3px solid #f472b6; padding-left: 0.875rem; margin-bottom: 1.5rem; }
+    .guide-section h3 { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 0.95rem; color: #000; margin-bottom: 0.35rem; }
+    .guide-section p { font-size: 0.78rem; color: #1e1e1e; line-height: 1.55; margin-bottom: 0.3rem; }
+    .guide-section .pill { display:inline-block; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:9999px; margin:0.15rem 0.1rem 0 0; }
+  </style>
+</head>
+<body class="text-slate-100 min-h-screen">
+
+  <!-- Auth Modal -->
+  <div id="auth-modal" class="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4">
+    <div class="bg-card border border-border rounded-xl w-full max-w-sm p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full overflow-hidden shrink-0">
+          <img src="/flower.png" class="w-full h-full object-cover" />
+        </div>
+        <h2 class="font-heading font-bold text-xl text-black">Investment Indicator</h2>
+      </div>
+      <div class="flex gap-2 mb-4">
+        <button id="tab-login" onclick="switchTab('login')"
+          class="flex-1 py-2 text-sm rounded-lg font-medium bg-surface text-white">Login</button>
+        <button id="tab-register" onclick="switchTab('register')"
+          class="flex-1 py-2 text-sm rounded-lg font-medium bg-pink-200 text-black">Register</button>
+      </div>
+      <input id="auth-username" type="text" placeholder="Username" autocomplete="username"
+        class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-3 focus:outline-none" />
+      <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password"
+        class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-1 focus:outline-none"
+        onkeydown="if(event.key==='Enter') doAuth()" />
+      <p id="auth-error" class="text-red-800 text-xs mb-3 min-h-[1rem]"></p>
+      <button onclick="doAuth()" id="auth-submit"
+        class="w-full bg-pink-700 hover:bg-pink-600 text-white py-2 rounded-lg text-sm font-medium transition-colors">
+        Login
+      </button>
+      <p class="text-black text-xs mt-3 opacity-70 text-center">Your watchlist is private to your account.</p>
+    </div>
+  </div>
+
+  <div id="app" class="max-w-7xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-3">
+        <div class="w-14 h-14 rounded-full overflow-hidden shrink-0 shadow-md">
+          <img src="/flower.png" class="w-full h-full object-cover" />
+        </div>
+        <div>
+          <h1 class="font-heading text-2xl font-bold text-black">Investment Indicator</h1>
+          <p id="last-updated" class="text-slate-500 text-sm mt-1">Loading...</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span id="user-greeting" class="text-black text-sm font-medium"></span>
+        <button onclick="logout()"
+          class="text-sm bg-pink-200 hover:bg-pink-300 text-black px-3 py-2 rounded-lg font-medium transition-colors">
+          Logout
+        </button>
+        <a id="admin-link" href="/admin.html" style="display:none"
+          class="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          Admin
+        </a>
+        <a href="/recommendations.html"
+          class="flex items-center gap-2 bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          Recommendations
+        </a>
+        <button onclick="openDiscover()" id="discover-btn"
+          class="flex items-center gap-2 bg-pink-700 hover:bg-pink-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+          Discover
+        </button>
+        <button onclick="toggleGuide()"
+          class="flex items-center gap-2 bg-pink-200 hover:bg-pink-300 text-black px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          ? Guide
+        </button>
+        <button onclick="refreshAll()" id="refresh-btn"
+          class="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Refresh All
+        </button>
+      </div>
+    </div>
+
+    <!-- Add Asset -->
+    <div class="bg-card border border-border rounded-xl p-4 mb-8">
+      <p class="text-white text-sm font-medium mb-3">Add to Watchlist</p>
+      <div class="flex gap-3 flex-wrap">
+        <input id="ticker-input" type="text" placeholder="Ticker (e.g. AAPL, SPK, BHP)"
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white placeholder-white focus:outline-none focus:border-blue-500 w-52"
+          onkeydown="if(event.key==='Enter') addAsset()" />
+        <select id="market-select"
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+          <option value="US">US (NYSE/NASDAQ)</option>
+          <option value="ASX">ASX (Australia)</option>
+          <option value="NZX">NZX (New Zealand)</option>
+        </select>
+        <button onclick="addAsset()" id="add-btn"
+          class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          Add
+        </button>
+        <label class="flex items-center gap-2 text-sm text-white self-center cursor-pointer">
+          <input type="checkbox" id="sharesies-check" checked
+            class="w-4 h-4 accent-green-500 cursor-pointer" />
+          On Sharesies
+        </label>
+        <span id="add-status" class="text-sm self-center text-white"></span>
+      </div>
+    </div>
+
+    <!-- Disclaimer -->
+    <div class="bg-amber-950 border border-amber-800 rounded-lg px-4 py-2 mb-6 text-amber-300 text-xs">
+      For informational purposes only. Not financial advice. Always do your own research before investing.
+    </div>
+
+    <!-- Asset Cards -->
+    <div id="cards" class="grid grid-cols-2 gap-4">
+      <div class="text-slate-500 text-sm text-center py-12">Loading watchlist...</div>
+    </div>
+
+  </div>
+
+  <!-- Discover Modal -->
+  <div id="discover-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-card border border-border rounded-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
+      <div class="flex justify-between items-center mb-1">
+        <h2 class="font-heading font-bold text-lg text-black">Discover New Stocks</h2>
+        <button onclick="closeDiscover()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <p class="text-black text-xs mb-5">AI-suggested stocks available on Sharesies based on your current watchlist. Not financial advice.</p>
+      <div id="discover-body">
+        <div class="flex items-center justify-center gap-3 py-16 text-black">
+          <svg class="spin w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Generating suggestions — this takes about 10 seconds...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- History Modal -->
+  <div id="modal" class="fixed inset-0 bg-black bg-opacity-70 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-card border border-border rounded-xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6">
+      <div class="flex justify-between items-center mb-4">
+        <h2 id="modal-title" class="font-heading font-bold text-lg text-black">History</h2>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+<script>
+  let authToken = localStorage.getItem('token');
+  let authMode = 'login';
+
+  async function apiFetch(url, opts = {}) {
+    const res = await fetch(url, {
+      ...opts,
+      headers: {
+        ...(opts.headers || {}),
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+      },
+    });
+    if (res.status === 401) {
+      authToken = null;
+      localStorage.removeItem('token');
+      showAuthModal();
+      throw new Error('Session expired — please log in again');
+    }
+    return res;
+  }
+
+  function showAuthModal() {
+    document.getElementById('auth-modal').classList.remove('hidden');
+    document.getElementById('cards').innerHTML = '';
+  }
+
+  function switchTab(mode) {
+    authMode = mode;
+    document.getElementById('auth-submit').textContent = mode === 'login' ? 'Login' : 'Create Account';
+    document.getElementById('tab-login').className = `flex-1 py-2 text-sm rounded-lg font-medium ${mode === 'login' ? 'bg-surface text-white' : 'bg-pink-200 text-black'}`;
+    document.getElementById('tab-register').className = `flex-1 py-2 text-sm rounded-lg font-medium ${mode === 'register' ? 'bg-surface text-white' : 'bg-pink-200 text-black'}`;
+    document.getElementById('auth-error').textContent = '';
+    document.getElementById('auth-password').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+  }
+
+  function doAuth() { authMode === 'login' ? login() : register(); }
+
+  async function login() {
+    const username = document.getElementById('auth-username').value.trim();
+    const password = document.getElementById('auth-password').value;
+    document.getElementById('auth-error').textContent = '';
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('auth-error').textContent = err.detail || 'Login failed';
+      return;
+    }
+    const { token, username: uname } = await res.json();
+    authToken = token;
+    localStorage.setItem('token', token);
+    // fetch me to get is_admin
+    const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+    const meData = me.ok ? await me.json() : {};
+    afterAuth(uname, meData.is_admin || false);
+  }
+
+  async function register() {
+    const username = document.getElementById('auth-username').value.trim();
+    const password = document.getElementById('auth-password').value;
+    document.getElementById('auth-error').textContent = '';
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('auth-error').textContent = err.detail || 'Registration failed';
+      return;
+    }
+    const { token, username: uname } = await res.json();
+    authToken = token;
+    localStorage.setItem('token', token);
+    const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+    const meData = me.ok ? await me.json() : {};
+    afterAuth(uname, meData.is_admin || false);
+  }
+
+  function applyUserUI(username, admin) {
+    document.getElementById('auth-modal').classList.add('hidden');
+    document.getElementById('user-greeting').textContent = `Hi, ${username}`;
+    if (admin) document.getElementById('admin-link').style.display = '';
+  }
+
+  function afterAuth(username, admin = false) {
+    applyUserUI(username, admin);
+    loadSnapshots();
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
+    }).catch(() => {});
+    authToken = null;
+    localStorage.removeItem('token');
+    document.getElementById('admin-link').style.display = 'none';
+    showAuthModal();
+  }
+
+  async function checkAuth() {
+    if (!authToken) { showAuthModal(); return; }
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    if (!res.ok) { authToken = null; localStorage.removeItem('token'); showAuthModal(); return; }
+    const data = await res.json();
+    applyUserUI(data.username, data.is_admin);
+    loadSnapshots();
+  }
+
+  let refreshing = new Set();
+
+  function renderMonteCarlo(asset) {
+    const mc = asset.signals || {};
+    if (!mc.mc_median_price) return '';
+    const cur = mc.mc_current_price;
+    const bear = mc.mc_bear_price, med = mc.mc_median_price, bull = mc.mc_bull_price;
+    const prob = mc.mc_prob_positive;
+    const ret = mc.mc_median_return;
+    const probColor = prob >= 60 ? '#86efac' : prob >= 45 ? '#fde68a' : '#fca5a5';
+    const retSign = ret >= 0 ? '+' : '';
+    const lo = Math.min(bear, cur) * 0.97, hi = Math.max(bull, cur) * 1.03;
+    const pos = v => Math.max(0, Math.min(100, Math.round((v - lo) / (hi - lo) * 100)));
+    return `
+    <div class="border-t border-border pt-2">
+      <p class="text-white font-bold text-xs text-center mb-1">12-Month Simulation</p>
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-pink-200 text-xs">${mc.mc_simulations?.toLocaleString()} paths</span>
+        <span class="text-xs font-bold" style="color:${probColor}">${prob}% gain</span>
+      </div>
+      <div class="relative h-4 rounded-full bg-pink-900 mb-2">
+        <div class="absolute h-full rounded-full" style="left:${pos(bear)}%;width:${pos(bull)-pos(bear)}%;background:rgba(255,255,255,0.15)"></div>
+        <div class="absolute top-0 h-full w-0.5 bg-white opacity-60" style="left:${pos(cur)}%"></div>
+        <div class="absolute top-0 h-full w-0.5" style="left:${pos(med)}%;background:${probColor}"></div>
+      </div>
+      <div class="space-y-0.5">
+        <div class="flex justify-between text-xs"><span class="text-pink-200">Bear</span><span class="text-red-300 font-bold">$${bear.toFixed(2)}</span></div>
+        <div class="flex justify-between text-xs"><span class="text-pink-200">Now</span><span class="text-white font-bold">$${cur.toFixed(2)}</span></div>
+        <div class="flex justify-between text-xs"><span class="text-pink-200">Median</span><span class="font-bold" style="color:${probColor}">$${med.toFixed(2)} (${retSign}${ret}%)</span></div>
+        <div class="flex justify-between text-xs"><span class="text-pink-200">Bull</span><span class="text-green-300 font-bold">$${bull.toFixed(2)}</span></div>
+      </div>
+    </div>`;
+  }
+
+  function scoreColor(score) {
+    if (score >= 70) return '#22c55e';
+    if (score >= 50) return '#eab308';
+    return '#ef4444';
+  }
+
+  function riskBadge(level) {
+    const map = {
+      'Low': 'bg-green-800 text-green-200 border-green-600',
+      'Medium': 'bg-yellow-800 text-yellow-200 border-yellow-600',
+      'High': 'bg-red-800 text-red-200 border-red-600',
+    };
+    return map[level] || 'bg-pink-900 text-pink-200 border-pink-700';
+  }
+
+  function priceChangeClass(pct) {
+    if (pct > 0) return 'text-green-400';
+    if (pct < 0) return 'text-red-400';
+    return 'text-slate-400';
+  }
+
+  function scoreBar(label, value, max) {
+    const pct = Math.round((value / max) * 100);
+    const color = pct >= 70 ? '#22c55e' : pct >= 45 ? '#eab308' : '#ef4444';
+    return `
+      <div class="flex items-center gap-2 text-xs">
+        <span class="text-black w-20 shrink-0">${label}</span>
+        <div class="flex-1 bg-pink-900 rounded-full h-1.5">
+          <div class="h-1.5 rounded-full" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <span class="text-black w-12 text-right">${value}/${max}</span>
+      </div>`;
+  }
+
+  const YF_SUFFIX = { NZX: '.NZ', ASX: '.AX', US: '', NYSE: '', NASDAQ: '' };
+
+  function externalLinks(ticker, market) {
+    const yfTicker = `${ticker}${YF_SUFFIX[market] || ''}`;
+    return [
+      { label: 'Yahoo', url: `https://finance.yahoo.com/quote/${encodeURIComponent(yfTicker)}` },
+      { label: 'Google', url: `https://www.google.com/finance/quote/${encodeURIComponent(ticker)}:${market === 'NZX' ? 'NZE' : market === 'ASX' ? 'ASX' : 'NASDAQ'}` },
+      { label: 'Sharesies', url: `https://www.sharesies.nz/companies/${encodeURIComponent(ticker.toLowerCase())}-${market.toLowerCase()}` },
+    ];
+  }
+
+  function renderExternalLinks(ticker, market) {
+    return externalLinks(ticker, market).map(l =>
+      `<a href="${l.url}" target="_blank" rel="noopener noreferrer" class="text-xs underline text-black hover:text-pink-900">${l.label}</a>`
+    ).join('<span class="text-black text-xs">·</span>');
+  }
+
+  function renderCard(asset) {
+    const hasSnapshot = asset.total_score != null;
+    const isLoading = refreshing.has(asset.id);
+    const score = hasSnapshot ? asset.total_score : null;
+    const color = '#000000';
+    const pct = asset.price_change_pct || 0;
+    const reasoning = asset.reasoning || {};
+    const marketLabel = { US: 'US', NYSE: 'US', NASDAQ: 'US', ASX: 'ASX', NZX: 'NZX' }[asset.market] || asset.market;
+
+    return `
+    <div class="bg-card border border-border rounded-xl p-5 fade-in flex flex-col">
+
+      <!-- Header: score ring + ticker info + action buttons -->
+      <div class="flex items-start gap-3">
+        <div class="score-ring shrink-0" style="border-color:${color};color:${color}">
+          ${isLoading
+            ? `<svg class="spin w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`
+            : score !== null ? score : '—'
+          }
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-heading font-bold text-lg text-white">${asset.ticker}</span>
+            <span class="text-xs bg-pink-900 text-pink-200 px-2 py-0.5 rounded">${marketLabel}</span>
+            ${asset.sharesies_available ? `<span class="text-xs bg-green-800 text-green-200 border border-green-600 px-2 py-0.5 rounded">Sharesies</span>` : ''}
+            ${hasSnapshot ? `<span class="text-xs border px-2 py-0.5 rounded ${riskBadge(asset.risk_level)}">${asset.risk_level} Risk</span>` : ''}
+          </div>
+          ${asset.name ? `<p class="text-black font-bold text-sm mt-0.5">${asset.name}</p>` : ''}
+          <div class="flex items-center gap-1.5 mt-0.5">${renderExternalLinks(asset.ticker, asset.market)}</div>
+          ${hasSnapshot ? `
+          <div class="flex items-center gap-3 mt-1 flex-wrap">
+            <span class="text-white font-medium">${asset.price != null ? asset.price.toFixed(2) : '—'}</span>
+            <span class="${priceChangeClass(pct)} text-sm">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% today</span>
+            <span class="text-black font-bold text-xs">${asset.confidence}% confidence</span>
+            <span class="text-black font-bold text-xs">${asset.time_horizon}</span>
+          </div>` : ''}
+        </div>
+        <div class="flex flex-col gap-2 shrink-0">
+          <button onclick="refreshOne(${asset.id})"
+            class="text-xs bg-pink-900 hover:bg-pink-800 text-white px-3 py-1.5 rounded-lg transition-colors">
+            Refresh
+          </button>
+          ${hasSnapshot ? `
+          <button onclick="showHistory(${asset.id}, '${asset.ticker}')"
+            class="text-xs bg-pink-900 hover:bg-pink-800 text-white px-3 py-1.5 rounded-lg transition-colors">
+            History
+          </button>` : ''}
+          <button onclick="toggleSharesies(${asset.id}, ${asset.sharesies_available ? 0 : 1})"
+            class="text-xs px-3 py-1.5 rounded-lg transition-colors ${asset.sharesies_available
+              ? 'bg-green-800 hover:bg-pink-900 text-green-200 hover:text-white'
+              : 'bg-pink-900 hover:bg-green-800 text-pink-300 hover:text-green-200'}">
+            ${asset.sharesies_available ? 'On Sharesies' : 'Add Sharesies'}
+          </button>
+          <button onclick="removeAsset(${asset.id})"
+            class="text-xs bg-pink-900 hover:bg-red-900 text-pink-300 hover:text-red-300 px-3 py-1.5 rounded-lg transition-colors">
+            Remove
+          </button>
+        </div>
+      </div>
+
+      ${hasSnapshot ? `
+      <!-- Score breakdown -->
+      <div class="mt-3 space-y-1.5">
+        ${scoreBar('Momentum', asset.momentum_score, 20)}
+        ${scoreBar('Growth', asset.financial_score, 25)}
+        ${scoreBar('Quality', asset.sentiment_score, 20)}
+        ${scoreBar('Valuation', asset.industry_score, 20)}
+        ${scoreBar('Stability', asset.valuation_score, 15)}
+      </div>
+
+      <!-- Charts side by side -->
+      <div class="flex gap-3 mt-3">
+        <div class="flex-1 min-w-0">
+          <p class="text-white font-bold text-xs text-center mb-1">${asset.ticker} — 1 Year</p>
+          <div style="height:160px"><canvas id="chart-${asset.id}"></canvas></div>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-white font-bold text-xs text-center mb-1">${asset.ticker} — 5 Year</p>
+          <div style="height:160px"><canvas id="chart5y-${asset.id}"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Monte Carlo -->
+      ${renderMonteCarlo(asset)}
+
+      <!-- Quantitative Model Inputs -->
+      ${(() => {
+        const s = asset.signals || {};
+        const fmt = (v, suffix='') => v != null ? `${typeof v === 'number' ? v.toFixed(2) : v}${suffix}` : '—';
+        const pct = v => v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
+        const rows = [
+          ['Momentum',  [
+            ['RSI (14)',        fmt(s.rsi_14)],
+            ['3mo Return',      pct(s.ret_3mo)],
+            ['1mo Return',      pct(s.ret_20d)],
+            ['vs MA50',         pct(s.price_vs_ma_50_pct ?? s['price_vs_ma_50_pct'])],
+            ['52w High',        pct(s.pct_from_52w_high)],
+          ]],
+          ['Growth',    [
+            ['Rev CAGR',        pct(s.revenue_cagr_pct)],
+            ['EPS CAGR',        pct(s.earnings_cagr_pct)],
+            ['FCF CAGR',        pct(s.fcf_cagr_pct)],
+            ['Rev Growth YoY',  pct(s.revenue_growth_yoy_pct)],
+            ['FCF Margin',      pct(s.fcf_margin_pct)],
+          ].filter(r => r[1] !== '—')],
+          ['Quality',   [
+            ['ROE',             s.returnOnEquity != null ? pct(s.returnOnEquity * 100) : '—'],
+            ['Debt/Equity',     s.debtToEquity != null ? fmt(s.debtToEquity) : '—'],
+            ['Op. Margin',      s.operatingMargins != null ? pct(s.operatingMargins * 100) : '—'],
+            ['Gross Margin',    s.grossMargins != null ? pct(s.grossMargins * 100) : '—'],
+          ]],
+          ['Valuation', [
+            ['P/E (trailing)',  s.trailingPE != null ? fmt(s.trailingPE) + 'x' : '—'],
+            ['P/E (forward)',   s.forwardPE != null ? fmt(s.forwardPE) + 'x' : '—'],
+            ['PEG Ratio',      s.pegRatio != null ? fmt(s.pegRatio) : '—'],
+            ['Price/Book',     s.priceToBook != null ? fmt(s.priceToBook) + 'x' : '—'],
+          ]],
+          ['Stability', [
+            ['Beta',            fmt(s.beta)],
+            ['Div Growth',      pct(s.dividend_growth_cagr_pct)],
+            ['FCF/Net Income',  fmt(s.fcf_to_net_income)],
+            ['Div Yield',       s.dividendYield != null ? pct(s.dividendYield * 100) : '—'],
+            ['Volatility Ann',  s.volatility_ann_pct != null ? fmt(s.volatility_ann_pct) + '%' : '—'],
+          ]],
+        ];
+        return `
+        <div class="mt-3 border-t border-border pt-3">
+          <p class="text-black font-bold text-xs mb-2">Quantitative Model Inputs</p>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+            ${rows.map(([label, pairs]) => `
+              <div>
+                <p class="text-black font-bold text-xs mb-1">${label}</p>
+                ${pairs.filter(([,v]) => v && v !== '—').map(([k,v]) => `
+                  <div class="flex justify-between text-xs">
+                    <span class="text-pink-100">${k}</span>
+                    <span class="text-white font-medium">${v}</span>
+                  </div>`).join('')}
+              </div>`).join('')}
+          </div>
+        </div>`;
+      })()}
+
+      <!-- Reasoning -->
+      ${reasoning.situation ? `
+      <div class="mt-4 space-y-2 border-t border-border pt-3">
+        <div class="text-sm"><span class="text-black font-bold">Situation: </span><span class="text-white">${reasoning.situation}</span></div>
+        <div class="text-sm"><span class="text-black font-bold">Key signal: </span><span class="text-white">${reasoning.key_signal}</span></div>
+        <div class="text-sm"><span class="text-black font-bold">Risk: </span><span class="text-white">${reasoning.risk_factor}</span></div>
+        <div class="text-sm"><span class="text-black font-bold">Why now: </span><span class="text-white">${reasoning.why_now}</span></div>
+      </div>` : ''}
+
+      <p class="text-black font-bold text-xs mt-3">Updated ${asset.timestamp ? new Date(asset.timestamp + 'Z').toLocaleString() : 'never'}</p>
+      ` : `<p class="text-slate-500 text-sm mt-2">${isLoading ? 'Analysing...' : 'No data yet — click refresh'}</p>`}
+    </div>`;
+  }
+
+  const chartInstances = {};
+
+  function buildChart(canvas, prices, tickCallback) {
+    const first = prices[0].price, last = prices[prices.length - 1].price;
+    const up = last >= first;
+    return new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: prices.map(p => p.date),
+        datasets: [{
+          data: prices.map(p => p.price),
+          borderColor: up ? 'rgba(134,239,172,0.9)' : 'rgba(252,165,165,0.9)',
+          backgroundColor: up ? 'rgba(134,239,172,0.15)' : 'rgba(252,165,165,0.15)',
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ` $${ctx.parsed.y.toFixed(2)}`, title: ctx => ctx[0].label } }
+        },
+        scales: {
+          x: {
+            display: true,
+            ticks: { color: 'rgba(255,255,255,0.6)', font: { size: 9 }, maxTicksLimit: 6, maxRotation: 0, callback: tickCallback },
+            grid: { color: 'rgba(255,255,255,0.08)' }, border: { display: false },
+          },
+          y: {
+            display: true, position: 'right',
+            ticks: { color: 'rgba(255,255,255,0.6)', font: { size: 9 }, maxTicksLimit: 4, callback: val => val.toFixed(0) },
+            grid: { color: 'rgba(255,255,255,0.08)' }, border: { display: false },
+          }
+        }
+      }
+    });
+  }
+
+  async function loadCharts(assets) {
+    const withData = assets.filter(a => a.total_score != null);
+    await Promise.all(withData.map(async a => {
+      try {
+        // 1-year chart
+        if (chartInstances[a.id]) { chartInstances[a.id].destroy(); delete chartInstances[a.id]; }
+        const canvas1y = document.getElementById(`chart-${a.id}`);
+        if (canvas1y) {
+          const prices1y = await apiFetch(`/api/prices/${a.id}?period=1y`).then(r => r.json());
+          if (prices1y.length) {
+            chartInstances[a.id] = buildChart(canvas1y, prices1y, (val, idx) => {
+              const d = new Date(prices1y[idx]?.date);
+              return d.toLocaleString('default', { month: 'short' });
+            });
+          }
+        }
+        // 5-year chart
+        const key5y = `5y-${a.id}`;
+        if (chartInstances[key5y]) { chartInstances[key5y].destroy(); delete chartInstances[key5y]; }
+        const canvas5y = document.getElementById(`chart5y-${a.id}`);
+        if (canvas5y) {
+          const prices5y = await apiFetch(`/api/prices/${a.id}?period=5y`).then(r => r.json());
+          if (prices5y.length) {
+            chartInstances[key5y] = buildChart(canvas5y, prices5y, (val, idx) => {
+              const d = new Date(prices5y[idx]?.date);
+              return d.getFullYear();
+            });
+          }
+        }
+      } catch(e) {}
+    }));
+  }
+
+  function renderData(data) {
+    const el = document.getElementById('cards');
+    if (!data.length) {
+      el.innerHTML = '<div class="text-slate-500 text-sm text-center py-12">Your watchlist is empty. Add a ticker above to get started.</div>';
+      document.getElementById('last-updated').textContent = '';
+      return;
+    }
+    el.innerHTML = data.map(renderCard).join('');
+    loadCharts(data);
+    const times = data.filter(d => d.timestamp).map(d => new Date(d.timestamp + 'Z'));
+    if (times.length) {
+      const latest = new Date(Math.max(...times));
+      document.getElementById('last-updated').textContent = `Last updated: ${latest.toLocaleString()}`;
+    }
+  }
+
+  async function loadSnapshots() {
+    try {
+      const data = await apiFetch('/api/snapshots').then(r => r.json());
+      renderData(data);
+    } catch (e) {
+      document.getElementById('cards').innerHTML = '<div class="text-red-400 text-sm text-center py-8">Failed to load data.</div>';
+    }
+  }
+
+  async function toggleSharesies(id, available) {
+    await apiFetch(`/api/watchlist/${id}/sharesies?available=${available === 1}`, { method: 'PATCH' });
+    await loadSnapshots();
+  }
+
+  async function addAsset() {
+    const ticker = document.getElementById('ticker-input').value.trim();
+    const market = document.getElementById('market-select').value;
+    const sharesies_available = document.getElementById('sharesies-check').checked;
+    const status = document.getElementById('add-status');
+    if (!ticker) return;
+
+    status.textContent = 'Adding...';
+    try {
+      const res = await apiFetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, market, sharesies_available })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        status.textContent = err.detail || 'Error';
+        return;
+      }
+      document.getElementById('ticker-input').value = '';
+      status.textContent = 'Added — analysing...';
+      setTimeout(() => { status.textContent = ''; }, 3000);
+      await loadSnapshots();
+      // Poll once after 15s to pick up the first analysis
+      setTimeout(loadSnapshots, 15000);
+    } catch (e) {
+      status.textContent = 'Error adding asset';
+    }
+  }
+
+  async function removeAsset(id) {
+    await apiFetch(`/api/watchlist/${id}`, { method: 'DELETE' });
+    refreshing.delete(id);
+    await loadSnapshots();
+  }
+
+  const REFRESH_SVG_SPIN = `<svg class="spin w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
+  const REFRESH_SVG      = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
+
+  async function refreshAll() {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true;
+    btn.innerHTML = `${REFRESH_SVG_SPIN} Refreshing...`;
+
+    try {
+      // Snapshot timestamps before refresh so we can detect when each card updates
+      const snap = await apiFetch('/api/snapshots').then(r => r.json());
+      const before = {};
+      snap.forEach(a => { before[a.id] = a.timestamp; refreshing.add(a.id); });
+      renderData(snap); // immediately show spinners on all cards
+
+      await apiFetch('/api/refresh', { method: 'POST' });
+
+      const maxAttempts = Math.max(snap.length * 5, 12);
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        const fresh = await apiFetch('/api/snapshots').then(r => r.json());
+        fresh.forEach(a => {
+          if (refreshing.has(a.id) && a.timestamp !== before[a.id]) {
+            refreshing.delete(a.id);
+          }
+        });
+        renderData(fresh);
+        attempts++;
+        if (refreshing.size === 0 || attempts >= maxAttempts) {
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.innerHTML = `${REFRESH_SVG} Refresh All`;
+        }
+      }, 5000);
+    } catch (e) {
+      btn.disabled = false;
+      btn.innerHTML = `${REFRESH_SVG} Refresh All`;
+    }
+  }
+
+  async function refreshOne(id) {
+    refreshing.add(id);
+    await loadSnapshots();
+    await apiFetch(`/api/refresh/${id}`, { method: 'POST' });
+    setTimeout(async () => {
+      refreshing.delete(id);
+      await loadSnapshots();
+    }, 20000);
+  }
+
+  async function showHistory(id, ticker) {
+    document.getElementById('modal-title').textContent = `${ticker} — History`;
+    document.getElementById('modal-body').innerHTML = '<p class="text-slate-400 text-sm">Loading...</p>';
+    document.getElementById('modal').classList.remove('hidden');
+
+    const res = await apiFetch(`/api/history/${id}`);
+    const rows = await res.json();
+
+    if (!rows.length) {
+      document.getElementById('modal-body').innerHTML = '<p class="text-slate-500 text-sm">No history yet.</p>';
+      return;
+    }
+
+    document.getElementById('modal-body').innerHTML = rows.map(r => `
+      <div class="border-b border-border py-3 last:border-0">
+        <div class="flex justify-between items-center">
+          <span class="font-bold text-lg" style="color:${scoreColor(r.total_score)}">${r.total_score}/100</span>
+          <span class="text-slate-500 text-xs">${new Date(r.timestamp + 'Z').toLocaleString()}</span>
+        </div>
+        <div class="flex gap-3 text-xs text-slate-400 mt-1">
+          <span>Price: ${r.price?.toFixed(2)}</span>
+          <span>${r.risk_level} Risk</span>
+          <span>${r.confidence}% confidence</span>
+        </div>
+        ${r.reasoning?.situation ? `<p class="text-slate-300 text-sm mt-2">${r.reasoning.situation}</p>` : ''}
+      </div>`).join('');
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.add('hidden');
+  }
+
+  document.getElementById('modal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('modal')) closeModal();
+  });
+
+  const THEME_COLORS = {
+    growth:      'bg-blue-800 text-blue-200 border-blue-600',
+    dividend:    'bg-green-800 text-green-200 border-green-600',
+    defensive:   'bg-pink-900 text-pink-200 border-pink-700',
+    speculative: 'bg-orange-800 text-orange-200 border-orange-600',
+    ETF:         'bg-purple-800 text-purple-200 border-purple-600',
+  };
+
+  function renderSuggestion(s, idx) {
+    const marketLabel = { US: 'US', NYSE: 'US', NASDAQ: 'US', ASX: 'ASX', NZX: 'NZX' }[s.market] || s.market;
+    const themeCls = THEME_COLORS[s.theme] || THEME_COLORS.defensive;
+    const pct = s.ret_1d;
+    const pctHtml = pct != null
+      ? `<span class="${pct >= 0 ? 'text-green-400' : 'text-red-400'} text-sm">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% today</span>`
+      : '';
+    const priceHtml = s.price != null ? `<span class="text-white font-medium">${s.price.toFixed(2)}</span>` : '';
+    const invalidNote = !s.valid ? `<p class="text-amber-500 text-xs mt-1">⚠ Could not fetch live price — verify ticker before adding</p>` : '';
+
+    return `
+    <div class="border border-border rounded-xl p-4 mb-3 fade-in">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="font-heading font-bold text-white text-base">${s.ticker}</span>
+            <span class="text-xs bg-pink-900 text-pink-200 px-2 py-0.5 rounded">${marketLabel}</span>
+            <span class="text-xs border px-2 py-0.5 rounded ${themeCls}">${s.theme}</span>
+          </div>
+          ${s.name ? `<p class="text-black text-sm">${s.name}</p>` : ''}
+          <div class="flex items-center gap-3 mt-1">${priceHtml}${pctHtml}</div>
+          ${s.sector ? `<p class="text-black text-xs mt-0.5">${s.sector}</p>` : ''}
+          ${invalidNote}
+          <p class="text-black text-sm mt-2">${s.why_interesting}</p>
+        </div>
+        <button onclick="addFromSuggestion(${idx})"
+          id="suggest-add-${idx}"
+          class="shrink-0 bg-indigo-700 hover:bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap">
+          + Add to Watchlist
+        </button>
+      </div>
+    </div>`;
+  }
+
+  let currentSuggestions = [];
+
+  async function openDiscover() {
+    document.getElementById('discover-modal').classList.remove('hidden');
+    document.getElementById('discover-body').innerHTML = `
+      <div class="flex items-center justify-center gap-3 py-16 text-black">
+        <svg class="spin w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Generating suggestions — this takes about 10 seconds...
+      </div>`;
+    try {
+      const res = await apiFetch('/api/suggest', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+      currentSuggestions = await res.json();
+      if (!currentSuggestions.length) {
+        document.getElementById('discover-body').innerHTML = '<p class="text-slate-500 text-sm py-8 text-center">No new suggestions found.</p>';
+        return;
+      }
+      document.getElementById('discover-body').innerHTML = currentSuggestions.map((s, i) => renderSuggestion(s, i)).join('');
+    } catch (e) {
+      document.getElementById('discover-body').innerHTML = `<p class="text-red-400 text-sm py-8 text-center">Failed to load suggestions: ${e.message}</p>`;
+    }
+  }
+
+  async function addFromSuggestion(idx) {
+    const s = currentSuggestions[idx];
+    if (!s) return;
+    const btn = document.getElementById(`suggest-add-${idx}`);
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+    try {
+      const res = await apiFetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: s.ticker, market: s.market, sharesies_available: true })
+      });
+      if (!res.ok) {
+        btn.textContent = 'Error';
+        return;
+      }
+      btn.textContent = 'Added ✓';
+      btn.classList.replace('bg-indigo-700', 'bg-green-800');
+      btn.classList.replace('hover:bg-indigo-600', 'hover:bg-green-800');
+      await loadSnapshots();
+    } catch {
+      btn.textContent = 'Error';
+    }
+  }
+
+  function closeDiscover() {
+    document.getElementById('discover-modal').classList.add('hidden');
+  }
+
+  document.getElementById('discover-modal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('discover-modal')) closeDiscover();
+  });
+
+  checkAuth();
+  setInterval(() => { if (authToken) loadSnapshots(); }, 60000);
+
+  // ── Guide panel ──────────────────────────────────────────────────────────────
+
+  let guidePinned = localStorage.getItem('guide-pinned') === 'true';
+
+  function initGuide() {
+    const panel = document.getElementById('guide-panel');
+    const pinBtn = document.getElementById('guide-pin-btn');
+    if (guidePinned) {
+      panel.classList.add('open');
+      document.body.classList.add('guide-pinned');
+      pinBtn.textContent = 'Unpin';
+    }
+  }
+
+  function toggleGuide() {
+    const panel = document.getElementById('guide-panel');
+    panel.classList.toggle('open');
+    if (!panel.classList.contains('open')) {
+      guidePinned = false;
+      localStorage.setItem('guide-pinned', 'false');
+      document.body.classList.remove('guide-pinned');
+      document.getElementById('guide-pin-btn').textContent = 'Pin';
+    }
+  }
+
+  function togglePin() {
+    const pinBtn = document.getElementById('guide-pin-btn');
+    guidePinned = !guidePinned;
+    localStorage.setItem('guide-pinned', guidePinned);
+    document.body.classList.toggle('guide-pinned', guidePinned);
+    pinBtn.textContent = guidePinned ? 'Unpin' : 'Pin';
+  }
+
+  initGuide();
+</script>
+
+<!-- Guide Panel -->
+<div id="guide-panel">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-heading font-bold text-lg text-black">How to Read</h2>
+    <div class="flex gap-2">
+      <button onclick="togglePin()" id="guide-pin-btn"
+        class="text-xs bg-surface text-white px-2.5 py-1 rounded-lg hover:bg-pink-800 transition-colors">Pin</button>
+      <button onclick="toggleGuide()" class="text-black hover:text-pink-800 text-xl leading-none font-bold">&times;</button>
+    </div>
+  </div>
+  <p class="text-black text-xs mb-5 opacity-70">A breakdown of every section on your stock cards, top to bottom.</p>
+
+  <div class="guide-section">
+    <h3>Overall Score</h3>
+    <p>A number from 0–100 representing the stock's overall investment attractiveness based on five weighted factors.</p>
+    <p><span class="pill bg-green-200 text-green-900">80–100</span> Strong signal</p>
+    <p><span class="pill bg-blue-200 text-blue-900">60–79</span> Moderate opportunity</p>
+    <p><span class="pill bg-amber-200 text-amber-900">40–59</span> Neutral / wait</p>
+    <p><span class="pill bg-red-200 text-red-900">0–39</span> Caution</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>Risk &amp; Confidence</h3>
+    <p><strong>Risk level</strong> (Low / Medium / High) reflects how volatile the stock is — how much the price might swing up or down.</p>
+    <p><strong>Confidence %</strong> shows how complete the underlying data was. Lower confidence means fewer data points were available for the analysis.</p>
+    <p><strong>Time horizon</strong> is the suggested holding period — short-term (days/weeks) or long-term (months/years).</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>Score Breakdown</h3>
+    <p>Five bars make up the overall score, each weighted differently:</p>
+    <p><strong>Momentum (20pts)</strong> — Is the price trending upward? Measured using RSI and recent returns.</p>
+    <p><strong>Growth (25pts)</strong> — Are revenues and earnings expanding? Higher weight as it drives long-term value.</p>
+    <p><strong>Quality (20pts)</strong> — News sentiment and analyst outlook. Positive press and upgrades score higher.</p>
+    <p><strong>Valuation (20pts)</strong> — Is the stock priced fairly compared to its sector? Low P/E relative to peers scores higher.</p>
+    <p><strong>Stability (15pts)</strong> — Consistency of price behaviour over time. Less erratic = higher score.</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>Price Charts</h3>
+    <p><strong>1-Year chart</strong> shows daily closing prices over the past 12 months — useful for spotting recent momentum or a downturn.</p>
+    <p><strong>5-Year chart</strong> shows weekly prices over 5 years — useful for understanding the broader trend and whether dips are temporary.</p>
+    <p>A stock rising on both charts is generally a stronger signal than one only rising recently.</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>Monte Carlo Simulation</h3>
+    <p>Runs 1,000 simulated future price paths based on the stock's historical daily returns and volatility.</p>
+    <p><strong>Bear</strong> — the worst 10% of simulated outcomes.</p>
+    <p><strong>Median</strong> — the middle outcome (50th percentile).</p>
+    <p><strong>Bull</strong> — the best 10% of simulated outcomes.</p>
+    <p>The <strong>% gain probability</strong> is how often the simulation ended in profit. Above 60% is generally positive.</p>
+    <p>This is not a prediction — it models probability based on past behaviour only.</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>Model Inputs</h3>
+    <p>The raw financial signals feeding the score. Key ones to know:</p>
+    <p><strong>RSI</strong> — Relative Strength Index. Above 70 = overbought (may fall), below 30 = oversold (may rise).</p>
+    <p><strong>P/E Ratio</strong> — Price-to-Earnings. Lower than the sector average suggests better value.</p>
+    <p><strong>Revenue growth</strong> — Year-over-year sales increase. Positive and accelerating is ideal.</p>
+    <p><strong>Volatility</strong> — How much the daily price moves. Higher volatility = more risk and reward.</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>Reasoning</h3>
+    <p>A plain-English AI summary explaining the four key factors behind the score:</p>
+    <p><strong>Situation</strong> — What's happening with this stock right now.</p>
+    <p><strong>Key signal</strong> — The single most important data point driving the score.</p>
+    <p><strong>Risk</strong> — The main thing that could go wrong.</p>
+    <p><strong>Why now</strong> — Whether the current timing looks favourable or not.</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>External Links</h3>
+    <p>Yahoo, Google, and Sharesies links open that stock's page on those sites for independent price checking, news, and buying.</p>
+  </div>
+</div>
+</body>
+</html>

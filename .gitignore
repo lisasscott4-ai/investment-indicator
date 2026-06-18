@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Database (user data lives in the cloud DB, not in git)
+*.db
+*.sqlite
+
+# SSL certificates
+*.pem
+*.key
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
