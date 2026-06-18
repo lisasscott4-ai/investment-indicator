@@ -389,12 +389,11 @@
   async function login() {
     const username   = document.getElementById('auth-username').value.trim();
     const password   = document.getElementById('auth-password').value;
-    const rememberMe = document.getElementById('remember-me').checked;
     document.getElementById('auth-error').textContent = '';
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, remember_me: rememberMe }),
+      body: JSON.stringify({ username, password, remember_me: true }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
