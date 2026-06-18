@@ -2,6 +2,7 @@ import hashlib
 import os
 import secrets
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool, NullPool
@@ -269,30 +270,46 @@ def authenticate_user(username: str, password: str):
         return None, None
     return row['user_id'], row.get('status', 'active')
 
+def _fmt_dt(dt: datetime) -> str:
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+def _parse_dt(val) -> datetime | None:
+    if val is None:
+        return None
+    if isinstance(val, str):
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S.%f'):
+            try:
+                return datetime.strptime(val[:19], fmt[:len(val[:19])])
+            except ValueError:
+                continue
+        return None
+    if hasattr(val, 'year'):
+        return val.replace(tzinfo=None) if getattr(val, 'tzinfo', None) else val
+    return None
+
 def create_session(user_id: str, remember_me: bool = True) -> str:
     token = secrets.token_urlsafe(32)
     days = 30 if remember_me else 1
-    if IS_POSTGRES:
-        sql = f"INSERT INTO sessions (token, user_id, remember_me, expires_at) VALUES (:token, :uid, :rm, CURRENT_TIMESTAMP + INTERVAL '{days} days')"
-    else:
-        sql = f"INSERT INTO sessions (token, user_id, remember_me, expires_at) VALUES (:token, :uid, :rm, datetime('now', '+{days} days'))"
+    expires_at = _fmt_dt(datetime.utcnow() + timedelta(days=days))
     with get_db() as conn:
-        conn.execute(text(sql), {'token': token, 'uid': user_id, 'rm': 1 if remember_me else 0})
+        conn.execute(text(
+            "INSERT INTO sessions (token, user_id, remember_me, expires_at) "
+            "VALUES (:token, :uid, :rm, :exp)"
+        ), {'token': token, 'uid': user_id, 'rm': 1 if remember_me else 0, 'exp': expires_at})
     return token
 
 def get_session_user(token: str):
-    if IS_POSTGRES:
-        valid_sql  = "SELECT user_id FROM sessions WHERE token = :t AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
-        expired_sql = "SELECT 1 FROM sessions WHERE token = :t AND expires_at <= CURRENT_TIMESTAMP"
-    else:
-        valid_sql  = "SELECT user_id FROM sessions WHERE token = :t AND (expires_at IS NULL OR expires_at > datetime('now'))"
-        expired_sql = "SELECT 1 FROM sessions WHERE token = :t AND expires_at <= datetime('now')"
     with get_db() as conn:
-        row = _row(conn.execute(text(valid_sql), {'t': token}))
-        if row:
-            return row['user_id'], False
-        expired = _row(conn.execute(text(expired_sql), {'t': token}))
-        return None, expired is not None
+        row = _row(conn.execute(
+            text("SELECT user_id, expires_at FROM sessions WHERE token = :t"),
+            {'t': token}
+        ))
+    if not row:
+        return None, False
+    exp = _parse_dt(row.get('expires_at'))
+    if exp and datetime.utcnow() > exp:
+        return None, True
+    return row['user_id'], False
 
 def refresh_session(token: str):
     with get_db() as conn:
@@ -300,20 +317,20 @@ def refresh_session(token: str):
     if not row:
         return
     days = 30 if row.get('remember_me', 1) else 1
-    if IS_POSTGRES:
-        sql = f"UPDATE sessions SET expires_at = CURRENT_TIMESTAMP + INTERVAL '{days} days' WHERE token = :t"
-    else:
-        sql = f"UPDATE sessions SET expires_at = datetime('now', '+{days} days') WHERE token = :t"
+    expires_at = _fmt_dt(datetime.utcnow() + timedelta(days=days))
     with get_db() as conn:
-        conn.execute(text(sql), {'t': token})
+        conn.execute(text("UPDATE sessions SET expires_at = :exp WHERE token = :t"),
+                     {'exp': expires_at, 't': token})
 
 def clean_expired_sessions():
-    if IS_POSTGRES:
-        sql = "DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP"
-    else:
-        sql = "DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime('now')"
-    with get_db() as conn:
-        conn.execute(text(sql))
+    now = _fmt_dt(datetime.utcnow())
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "DELETE FROM sessions WHERE expires_at IS NOT NULL AND CAST(expires_at AS TEXT) < :now"
+            ), {'now': now})
+    except Exception:
+        pass
 
 def delete_session(token: str):
     with get_db() as conn:
