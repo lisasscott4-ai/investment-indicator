@@ -110,11 +110,6 @@ def login(req: AuthRequest):
     token = create_session(user_id)
     return {"token": token, "username": req.username.lower().strip()}
 
-@app.get("/api/admin/emergency-reset-lisascottadmin")
-def emergency_reset():
-    update_password("lisascottadmin", "Lisajadescott1!")
-    return {"ok": True, "msg": "Password reset"}
-
 @app.post("/api/auth/verify-birthday")
 def verify_birthday_endpoint(req: VerifyBirthdayRequest):
     if not verify_birthday(req.username, req.birthday):
