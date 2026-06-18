@@ -21,7 +21,7 @@ from database import (
     create_user, authenticate_user, create_session,
     get_session_user, delete_session, get_username,
     is_admin, admin_exists, get_all_users, get_platform_stats,
-    get_health_warnings,
+    get_health_warnings, get_pending_users, approve_user, reject_user,
 )
 from analyzer import analyze_asset, suggest_stocks, get_price_preview
 
@@ -50,6 +50,14 @@ class AuthRequest(BaseModel):
     username: str
     password: str
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: str = None
+    birthday: str = None
+    phone: str = None
+    address: str = None
+
 def require_user(authorization: str = Header(None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Not authenticated")
@@ -65,7 +73,7 @@ def require_admin(user_id: str = Depends(require_user)) -> str:
     return user_id
 
 @app.post("/api/auth/register")
-def register(req: AuthRequest):
+def register(req: RegisterRequest):
     username = req.username.strip()
     if len(username) < 3 or len(username) > 50:
         raise HTTPException(400, "Username must be 3–50 characters")
@@ -74,17 +82,22 @@ def register(req: AuthRequest):
     if len(req.password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
     try:
-        user_id = create_user(username, req.password)
+        create_user(username, req.password,
+                    email=req.email, birthday=req.birthday,
+                    phone=req.phone, address=req.address)
     except ValueError as e:
         raise HTTPException(409, str(e))
-    token = create_session(user_id)
-    return {"token": token, "username": username.lower()}
+    return {"pending": True, "username": username.lower()}
 
 @app.post("/api/auth/login")
 def login(req: AuthRequest):
-    user_id = authenticate_user(req.username, req.password)
+    user_id, status = authenticate_user(req.username, req.password)
     if not user_id:
         raise HTTPException(401, "Invalid username or password")
+    if status == 'pending':
+        raise HTTPException(403, "Your account is awaiting admin approval")
+    if status == 'rejected':
+        raise HTTPException(403, "Your account request was not approved")
     token = create_session(user_id)
     return {"token": token, "username": req.username.lower().strip()}
 
@@ -130,6 +143,20 @@ def admin_users(_: str = Depends(require_admin)):
 def admin_health(_: str = Depends(require_admin)):
     return get_health_warnings()
 
+@app.get("/api/admin/requests")
+def admin_requests(_: str = Depends(require_admin)):
+    return get_pending_users()
+
+@app.post("/api/admin/users/{user_id}/approve")
+def admin_approve(user_id: str, _: str = Depends(require_admin)):
+    approve_user(user_id)
+    return {"ok": True}
+
+@app.post("/api/admin/users/{user_id}/reject")
+def admin_reject(user_id: str, _: str = Depends(require_admin)):
+    reject_user(user_id)
+    return {"ok": True}
+
 @app.get("/api/admin/users/{user_id}/assets")
 def admin_user_assets(user_id: str, _: str = Depends(require_admin)):
     return get_active_assets(user_id)
@@ -139,10 +166,11 @@ def admin_delete_user(user_id: str, admin_id: str = Depends(require_admin)):
     if user_id == admin_id:
         raise HTTPException(400, "Cannot delete your own account")
     from database import get_db
+    from sqlalchemy import text as _text
     with get_db() as conn:
-        conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-        conn.execute("UPDATE assets SET active = 0 WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        conn.execute(_text("DELETE FROM sessions WHERE user_id = :uid"), {'uid': user_id})
+        conn.execute(_text("UPDATE assets SET active = 0 WHERE user_id = :uid"), {'uid': user_id})
+        conn.execute(_text("DELETE FROM users WHERE user_id = :uid"), {'uid': user_id})
     return {"ok": True}
 
 def refresh_all():

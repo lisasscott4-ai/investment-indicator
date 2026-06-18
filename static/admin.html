@@ -56,6 +56,21 @@
     <!-- Stats row -->
     <div id="stats-row" class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6"></div>
 
+    <!-- Pending account requests -->
+    <div id="requests-section" class="hidden mb-6">
+      <div class="bg-card border border-border rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <h2 class="font-heading font-bold text-lg text-black">Account Requests</h2>
+            <span id="requests-badge" class="hidden bg-pink-700 text-white text-xs font-bold px-2 py-0.5 rounded-full"></span>
+          </div>
+        </div>
+        <div id="requests-body">
+          <p class="text-black text-sm">No pending requests.</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Health warnings -->
     <div id="health-section" class="hidden mb-6">
       <div class="bg-card border border-border rounded-xl p-6">
@@ -184,6 +199,72 @@
     body.innerHTML = noDataHtml + staleHtml;
   }
 
+  async function loadRequests() {
+    const res = await apiFetch('/api/admin/requests');
+    if (!res.ok) return;
+    const requests = await res.json();
+
+    const section = document.getElementById('requests-section');
+    const body = document.getElementById('requests-body');
+    const badge = document.getElementById('requests-badge');
+    section.classList.remove('hidden');
+
+    if (!requests.length) {
+      badge.classList.add('hidden');
+      body.innerHTML = '<p class="text-black text-sm">No pending account requests.</p>';
+      return;
+    }
+
+    badge.textContent = requests.length;
+    badge.classList.remove('hidden');
+
+    body.innerHTML = `
+      <div class="space-y-4">
+        ${requests.map(r => `
+        <div class="bg-pink-100 border border-pink-300 rounded-xl p-4 fade-in" id="req-${r.user_id}">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <p class="font-bold text-black text-sm mb-2">${r.username}</p>
+              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-700">
+                ${r.email    ? `<span><span class="font-semibold text-black">Email:</span> ${r.email}</span>` : ''}
+                ${r.birthday ? `<span><span class="font-semibold text-black">DOB:</span> ${r.birthday}</span>` : ''}
+                ${r.phone    ? `<span><span class="font-semibold text-black">Phone:</span> ${r.phone}</span>` : ''}
+                ${r.address  ? `<span class="col-span-2"><span class="font-semibold text-black">Address:</span> ${r.address}</span>` : ''}
+              </div>
+              <p class="text-xs text-slate-500 mt-2">Requested ${new Date(r.created_at + 'Z').toLocaleString()}</p>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <button onclick="approveUser('${r.user_id}')"
+                class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg font-medium transition-colors">
+                Approve
+              </button>
+              <button onclick="rejectUser('${r.user_id}', '${r.username}')"
+                class="bg-red-800 hover:bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium transition-colors">
+                Reject
+              </button>
+            </div>
+          </div>
+        </div>`).join('')}
+      </div>`;
+  }
+
+  async function approveUser(userId) {
+    const res = await apiFetch(`/api/admin/users/${userId}/approve`, { method: 'POST' });
+    if (res.ok) {
+      document.getElementById(`req-${userId}`)?.remove();
+      loadRequests();
+    }
+  }
+
+  async function rejectUser(userId, username) {
+    if (!confirm(`Reject account request from "${username}"?`)) return;
+    const res = await apiFetch(`/api/admin/users/${userId}/reject`, { method: 'POST' });
+    if (res.ok) {
+      document.getElementById(`req-${userId}`)?.remove();
+      loadRequests();
+    }
+  }
+
   async function loadData() {
     // Check admin access
     const me = await fetch('/api/auth/me', {
@@ -193,7 +274,8 @@
     const meData = await me.json();
     if (!meData.is_admin) { window.location.href = '/'; return; }
 
-    // Stats + health in parallel
+    // Stats + health + requests in parallel
+    loadRequests();
     const [statsRes, healthRes] = await Promise.all([
       apiFetch('/api/admin/stats'),
       apiFetch('/api/admin/health'),

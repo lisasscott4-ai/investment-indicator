@@ -62,7 +62,7 @@
 
   <!-- Auth Modal -->
   <div id="auth-modal" class="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4">
-    <div class="bg-card border border-border rounded-xl w-full max-w-sm p-6">
+    <div class="bg-card border border-border rounded-xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center gap-3 mb-4">
         <div class="w-10 h-10 rounded-full overflow-hidden shrink-0">
           <img src="/flower.png" class="w-full h-full object-cover" />
@@ -75,12 +75,43 @@
         <button id="tab-register" onclick="switchTab('register')"
           class="flex-1 py-2 text-sm rounded-lg font-medium bg-pink-200 text-black">Register</button>
       </div>
-      <input id="auth-username" type="text" placeholder="Username" autocomplete="username"
-        class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-3 focus:outline-none" />
-      <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password"
-        class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-1 focus:outline-none"
-        onkeydown="if(event.key==='Enter') doAuth()" />
-      <p id="auth-error" class="text-red-800 text-xs mb-3 min-h-[1rem]"></p>
+
+      <!-- Pending approval message (shown after successful registration) -->
+      <div id="auth-pending" class="hidden text-center py-4">
+        <div class="text-4xl mb-3">🌸</div>
+        <p class="font-heading font-bold text-black text-lg mb-2">Request Submitted!</p>
+        <p class="text-black text-sm">Your account request has been sent for approval. You'll be able to log in once an admin approves your account.</p>
+      </div>
+
+      <!-- Login fields -->
+      <div id="login-fields">
+        <input id="auth-username" type="text" placeholder="Username" autocomplete="username"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-3 focus:outline-none" />
+        <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm mb-1 focus:outline-none"
+          onkeydown="if(event.key==='Enter') doAuth()" />
+      </div>
+
+      <!-- Register fields (shown when register tab active) -->
+      <div id="register-fields" class="hidden space-y-3">
+        <input id="reg-username" type="text" placeholder="Username (min 3 chars)"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+        <input id="reg-password" type="password" placeholder="Password (min 8 chars)"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+        <input id="reg-email" type="email" placeholder="Email address"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+        <div>
+          <label class="text-black text-xs mb-1 block">Date of Birth</label>
+          <input id="reg-birthday" type="date"
+            class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white text-sm focus:outline-none" />
+        </div>
+        <input id="reg-phone" type="tel" placeholder="Phone number"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+        <input id="reg-address" type="text" placeholder="Address"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-pink-200 text-sm focus:outline-none" />
+      </div>
+
+      <p id="auth-error" class="text-red-800 text-xs mb-3 min-h-[1rem] mt-1"></p>
       <button onclick="doAuth()" id="auth-submit"
         class="w-full bg-pink-700 hover:bg-pink-600 text-white py-2 rounded-lg text-sm font-medium transition-colors">
         Login
@@ -235,11 +266,14 @@
 
   function switchTab(mode) {
     authMode = mode;
-    document.getElementById('auth-submit').textContent = mode === 'login' ? 'Login' : 'Create Account';
+    document.getElementById('auth-submit').textContent = mode === 'login' ? 'Login' : 'Request Account';
     document.getElementById('tab-login').className = `flex-1 py-2 text-sm rounded-lg font-medium ${mode === 'login' ? 'bg-surface text-white' : 'bg-pink-200 text-black'}`;
     document.getElementById('tab-register').className = `flex-1 py-2 text-sm rounded-lg font-medium ${mode === 'register' ? 'bg-surface text-white' : 'bg-pink-200 text-black'}`;
     document.getElementById('auth-error').textContent = '';
-    document.getElementById('auth-password').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+    document.getElementById('auth-pending').classList.add('hidden');
+    document.getElementById('login-fields').classList.toggle('hidden', mode !== 'login');
+    document.getElementById('register-fields').classList.toggle('hidden', mode !== 'register');
+    document.getElementById('auth-submit').classList.toggle('hidden', false);
   }
 
   function doAuth() { authMode === 'login' ? login() : register(); }
@@ -261,32 +295,33 @@
     const { token, username: uname } = await res.json();
     authToken = token;
     localStorage.setItem('token', token);
-    // fetch me to get is_admin
     const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
     const meData = me.ok ? await me.json() : {};
     afterAuth(uname, meData.is_admin || false);
   }
 
   async function register() {
-    const username = document.getElementById('auth-username').value.trim();
-    const password = document.getElementById('auth-password').value;
+    const username = document.getElementById('reg-username').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const email    = document.getElementById('reg-email').value.trim();
+    const birthday = document.getElementById('reg-birthday').value;
+    const phone    = document.getElementById('reg-phone').value.trim();
+    const address  = document.getElementById('reg-address').value.trim();
     document.getElementById('auth-error').textContent = '';
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, email, birthday, phone, address }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       document.getElementById('auth-error').textContent = err.detail || 'Registration failed';
       return;
     }
-    const { token, username: uname } = await res.json();
-    authToken = token;
-    localStorage.setItem('token', token);
-    const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-    const meData = me.ok ? await me.json() : {};
-    afterAuth(uname, meData.is_admin || false);
+    // Show pending approval message
+    document.getElementById('register-fields').classList.add('hidden');
+    document.getElementById('auth-submit').classList.add('hidden');
+    document.getElementById('auth-pending').classList.remove('hidden');
   }
 
   function applyUserUI(username, admin) {

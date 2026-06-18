@@ -47,12 +47,17 @@ def _insert_ignore(conn, sql_sqlite, sql_pg, params):
 
 _SCHEMA_PG = """
 CREATE TABLE IF NOT EXISTS users (
-    id          SERIAL PRIMARY KEY,
-    user_id     TEXT NOT NULL UNIQUE,
-    username    TEXT NOT NULL UNIQUE,
+    id            SERIAL PRIMARY KEY,
+    user_id       TEXT NOT NULL UNIQUE,
+    username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    is_admin    INTEGER DEFAULT 0,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    is_admin      INTEGER DEFAULT 0,
+    status        TEXT DEFAULT 'pending',
+    email         TEXT,
+    birthday      TEXT,
+    phone         TEXT,
+    address       TEXT,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         SERIAL PRIMARY KEY,
@@ -110,6 +115,11 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     is_admin      INTEGER DEFAULT 0,
+    status        TEXT DEFAULT 'pending',
+    email         TEXT,
+    birthday      TEXT,
+    phone         TEXT,
+    address       TEXT,
     created_at    TEXT DEFAULT (CURRENT_TIMESTAMP)
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -175,6 +185,13 @@ def init_db():
             "ALTER TABLE assets ADD COLUMN user_id TEXT NOT NULL DEFAULT 'anon'",
             "ALTER TABLE recommendations ADD COLUMN industry TEXT",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'",
+            "ALTER TABLE users ADD COLUMN email TEXT",
+            "ALTER TABLE users ADD COLUMN birthday TEXT",
+            "ALTER TABLE users ADD COLUMN phone TEXT",
+            "ALTER TABLE users ADD COLUMN address TEXT",
+            # Existing admin accounts should be active
+            "UPDATE users SET status = 'active' WHERE is_admin = 1 AND (status IS NULL OR status = 'pending')",
         ]:
             try:
                 conn.execute(text(sql))
@@ -207,16 +224,23 @@ def _check_password(password: str, stored: str) -> bool:
     key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 200_000)
     return secrets.compare_digest(key.hex(), key_hex)
 
-def create_user(username: str, password: str, is_admin: bool = False) -> str:
+def create_user(username: str, password: str, is_admin: bool = False,
+                email: str = None, birthday: str = None,
+                phone: str = None, address: str = None) -> str:
     user_id = secrets.token_urlsafe(16)
     password_hash = _hash_password(password)
+    # Admins are active immediately; regular users need approval
+    status = 'active' if is_admin else 'pending'
     try:
         with get_db() as conn:
             conn.execute(text(
-                "INSERT INTO users (user_id, username, password_hash, is_admin) "
-                "VALUES (:uid, :username, :pw, :admin)"
+                "INSERT INTO users (user_id, username, password_hash, is_admin, status, "
+                "email, birthday, phone, address) "
+                "VALUES (:uid, :username, :pw, :admin, :status, :email, :birthday, :phone, :address)"
             ), {'uid': user_id, 'username': username.lower().strip(),
-                'pw': password_hash, 'admin': 1 if is_admin else 0})
+                'pw': password_hash, 'admin': 1 if is_admin else 0,
+                'status': status, 'email': email, 'birthday': birthday,
+                'phone': phone, 'address': address})
     except Exception as e:
         if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
             raise ValueError("Username already taken")
@@ -226,12 +250,12 @@ def create_user(username: str, password: str, is_admin: bool = False) -> str:
 def authenticate_user(username: str, password: str):
     with get_db() as conn:
         row = _row(conn.execute(
-            text("SELECT user_id, password_hash FROM users WHERE username = :u"),
+            text("SELECT user_id, password_hash, status FROM users WHERE username = :u"),
             {'u': username.lower().strip()}
         ))
     if not row or not _check_password(password, row['password_hash']):
-        return None
-    return row['user_id']
+        return None, None
+    return row['user_id'], row.get('status', 'active')
 
 def create_session(user_id: str) -> str:
     token = secrets.token_urlsafe(32)
@@ -274,6 +298,25 @@ def admin_exists() -> bool:
     with get_db() as conn:
         row = _row(conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")))
     return row is not None
+
+def get_pending_users():
+    with get_db() as conn:
+        return _rows(conn.execute(text(
+            "SELECT user_id, username, email, birthday, phone, address, created_at "
+            "FROM users WHERE status = 'pending' ORDER BY created_at ASC"
+        )))
+
+def approve_user(user_id: str):
+    with get_db() as conn:
+        conn.execute(text(
+            "UPDATE users SET status = 'active' WHERE user_id = :uid"
+        ), {'uid': user_id})
+
+def reject_user(user_id: str):
+    with get_db() as conn:
+        conn.execute(text(
+            "UPDATE users SET status = 'rejected' WHERE user_id = :uid"
+        ), {'uid': user_id})
 
 def get_all_users():
     with get_db() as conn:
